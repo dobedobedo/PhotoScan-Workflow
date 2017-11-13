@@ -14,7 +14,7 @@ This script runs through all chunks and will do the following:
 
 GCP needs to be marked manually
 
-Prerequisitesfor standard workflow:
+Prerequisites for standard workflow:
     1. Set CRS
     2. Photo alignment
     3. Marking GCP
@@ -82,8 +82,7 @@ def BuildDenseCloud(chunk, Quality, FilterMode):
                           reuse_depth=False)
     
 def ClassifyGround(chunk, Max_Angle, Cell_Size):
-    DEM_resolution = float(chunk.dense_cloud.meta['dense_cloud/resolution']) * chunk.transform.scale
-    Image_resolution = DEM_resolution / int(chunk.dense_cloud.meta['dense_cloud/depth_downscale'])
+    DEM_resolution, Image_resolution = GetResolution(chunk)
     chunk.dense_cloud.classifyGroundPoints(max_angle=Max_Angle, 
                                            max_distance=2*Image_resolution, 
                                            cell_size=Cell_Size)
@@ -122,6 +121,8 @@ def StandardWorkflow(doc, chunk, **kwargs):
     else:
         if chunk.dense_cloud is None:
             BuildDenseCloud(chunk, kwargs['Quality'], kwargs['FilterMode'])
+    # Must save before classification. Otherwise it fails.
+            doc.save()
             ClassifyGround(chunk, kwargs['Max_Angle'], kwargs['Cell_Size'])
         if chunk.model is None:
             BuildModel(chunk)
@@ -134,6 +135,7 @@ def StandardWorkflow(doc, chunk, **kwargs):
     # Therefore, we need to duplicate the chunk to create DEM
             new_chunk = chunk.copy(items=[PhotoScan.DataSource.DenseCloudData])
             new_chunk.label = chunk.label + '_DEM'
+            doc.save()
             BuildDEM(new_chunk)
         doc.save()
         
@@ -143,6 +145,11 @@ def StandardWorkflow(doc, chunk, **kwargs):
         if chunk.orthomosaic is None:
             BuildMosaic(chunk, kwargs['BlendingMode'])
         doc.save()
+
+def GetResolution(chunk):
+    DEM_resolution = float(chunk.dense_cloud.meta['dense_cloud/resolution']) * chunk.transform.scale
+    Image_resolution = DEM_resolution / int(chunk.dense_cloud.meta['dense_cloud/depth_downscale'])
+    return DEM_resolution, Image_resolution
 
 # The following process will only be executed when running script    
 if __name__ == '__main__':
