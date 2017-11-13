@@ -168,5 +168,6 @@ if __name__ == '__main__':
         else:
             StandardWorkflow(doc, chunk, 
                              Quality=Quality, FilterMode=FilterMode, 
-                             Max_Angle=Max_Angle, Cell_Size=Cell_Size)
+                             Max_Angle=Max_Angle, Cell_Size=Cell_Size, 
+                             BlendingMode=BlendingMode)
     
