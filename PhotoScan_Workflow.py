@@ -34,6 +34,9 @@ The DEM will be generated in duplicated chunk: "chunk name"_DEM respectively
 Therefore, please avoid "_DEM" in your chunk name. Otherwise, it will not be processed.
 """
 import PhotoScan
+from datetime import datetime
+from pytz import utc
+from pysolar import solar
 
 doc = PhotoScan.app.document
 
@@ -146,10 +149,58 @@ def StandardWorkflow(doc, chunk, **kwargs):
             BuildMosaic(chunk, kwargs['BlendingMode'])
         doc.save()
 
+# The following functions are for extra correction purposes
+
 def GetResolution(chunk):
     DEM_resolution = float(chunk.dense_cloud.meta['dense_cloud/resolution']) * chunk.transform.scale
     Image_resolution = DEM_resolution / int(chunk.dense_cloud.meta['dense_cloud/depth_downscale'])
     return DEM_resolution, Image_resolution
+
+def GetCameraDepth(chunk, camera):
+    # Get camra depth array from camera location to elevation model
+    depth = chunk.model.renderDepth(camera.transform, camera.sensor.calibration)
+    
+    # Scale the depth array
+    depth_scaled = PhotoScan.Image(depth.width, depth.height, " ", "F32")
+    
+    for y in range(depth.height):
+        for x in range(depth.width):
+            depth_scaled[x, y] = (depth[x, y][0] * chunk.transform.scale, )
+    return depth_scaled
+
+def GetProjectVector(u, v, camera):
+    pixel = PhotoScan.Vector([u, v])
+    # Calculate the vector from sensor centre to pixel (u, v)
+    ray = camera.transform.mulv(camera.sensor.calibration.unproject(pixel))
+    
+    return ray
+
+def GetPixelLocation(u, v, chunk, camera, depth_scaled, crs):
+    # Get the vector from sensor centre to pixel (u, v)
+    ray = GetProjectVector(u, v, camera)
+    
+    # Calculate the pixel location in chunk crs
+    chunk_point = camera.center + ray * depth_scaled[u, v][0] / chunk.transform.scale
+    
+    # Calculate the pixel geographic location
+    geo_point = crs.project(chunk.transform.matrix.mulp(chunk_point))
+    
+    return geo_point
+
+def GetDateTime(camera):
+    Time = camera.photo.meta['Exif/DateTimeOriginal']
+    Time = datetime.strptime(Time, '%Y:%m:%d %H:%M:%S')
+    Time_UTC = utc.localize(Time, is_dst=False)
+    return Time_UTC
+
+def GetSunAngle(LonLat, time):
+    Sun_zenith = 90 - solar.get_altitude(LonLat[1], LonLat[0], time)
+    Sun_azimuth_South = solar.get_azimuth(LonLat[1], LonLat[0], time)
+    # Convert azimuth to zero-to-north
+    Sun_azimuth = 180 - Sun_azimuth_South
+    if abs(Sun_azimuth) >= 360:
+        Sun_azimuth -= 360
+    return Sun_zenith, Sun_azimuth
 
 # The following process will only be executed when running script    
 if __name__ == '__main__':
@@ -170,4 +221,6 @@ if __name__ == '__main__':
                              Quality=Quality, FilterMode=FilterMode, 
                              Max_Angle=Max_Angle, Cell_Size=Cell_Size, 
                              BlendingMode=BlendingMode)
+    
+    PhotoScan.app.update()
     
