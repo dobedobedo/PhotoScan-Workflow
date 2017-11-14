@@ -202,6 +202,20 @@ def GetSunAngle(LonLat, time):
         Sun_azimuth -= 360
     return Sun_zenith, Sun_azimuth
 
+def CreateSunViewGeometryArrays(chunk, camera):
+    Camera_Depth_Array = GetCameraDepth(chunk, camera)
+    width = camera.sensor.width
+    height = camera.sensor.height
+    Sun_zenith = PhotoScan.Image(width, height, " ", "F32")
+    Sun_azimuth = PhotoScan.Image(width, height, " ", "F32")
+    for v in range(height):
+        for u in range(width):
+            geo_point = GetPixelLocation(u, v, chunk, camera, Camera_Depth_Array, wgs_84)
+            Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
+            Sun_zenith[u,v] = (Pixel_Sun_zenith, )
+            Sun_azimuth[u,v] = (Pixel_Sun_azimuth)
+    return Sun_zenith, Sun_azimuth
+
 # The following process will only be executed when running script    
 if __name__ == '__main__':
     # Initialising listing chunks
