@@ -213,7 +213,7 @@ def CreateSunViewGeometryArrays(chunk, camera):
             geo_point = GetPixelLocation(u, v, chunk, camera, Camera_Depth_Array, wgs_84)
             Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
             Sun_zenith[u,v] = (Pixel_Sun_zenith, )
-            Sun_azimuth[u,v] = (Pixel_Sun_azimuth)
+            Sun_azimuth[u,v] = (Pixel_Sun_azimuth, )
     return Sun_zenith, Sun_azimuth
 
 # The following process will only be executed when running script    
