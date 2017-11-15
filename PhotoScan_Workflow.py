@@ -216,6 +216,22 @@ def CreateSunViewGeometryArrays(chunk, camera):
             Sun_azimuth[u,v] = (Pixel_Sun_azimuth, )
     return Sun_zenith, Sun_azimuth
 
+def GetWorldRotMatrix(chunk, camera):
+    T = chunk.transform.matrix
+    m = chunk.crs.localframe(T.mulp(camera.center))
+    R= m * T * camera.transform * PhotoScan.Matrix().Diag([1, -1, -1, 1])
+    return R.rotation()
+
+def GetYawPitchRoll(chunk, camera):
+    R = GetWorldRotMatrix(chunk, camera)
+    yaw, pitch, roll = PhotoScan.utils.mat2ypr(R)
+    return yaw, pitch, roll
+
+def GetOmegaPhiKappa(chunk, camera):
+    R = GetWorldRotMatrix(chunk, camera)
+    omega, phi, kappa = PhotoScan.utils.mat2opk(R)
+    return omega, phi, kappa
+
 # The following process will only be executed when running script    
 if __name__ == '__main__':
     # Initialising listing chunks
