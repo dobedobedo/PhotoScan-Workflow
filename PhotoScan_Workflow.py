@@ -34,9 +34,9 @@ The DEM will be generated in duplicated chunk: "chunk name"_DEM respectively
 Therefore, please avoid "_DEM" in your chunk name. Otherwise, it will not be processed.
 """
 import PhotoScan
-from datetime import datetime
-from pytz import utc
+from datetime import datetime, timezone
 from pysolar import solar
+from math import sqrt, atan2, degrees
 
 doc = PhotoScan.app.document
 
@@ -65,6 +65,10 @@ Cell_Size = 10
 # Blending: AverageBlending, MosaicBlending, MinBlending, MaxBlending, DisabledBlending
 BlendingMode = PhotoScan.BlendingMode.MosaicBlending
 #
+# Variable for calculating date time
+# UTC = True if the timestamp of image is record in UTC
+# Otherwise, local time zone will be used
+UTC = False
 #######################################################
 
 wgs_84 = PhotoScan.CoordinateSystem("EPSG::4326")
@@ -190,8 +194,15 @@ def GetPixelLocation(u, v, chunk, camera, depth_scaled, crs):
 def GetDateTime(camera):
     Time = camera.photo.meta['Exif/DateTimeOriginal']
     Time = datetime.strptime(Time, '%Y:%m:%d %H:%M:%S')
-    Time_UTC = utc.localize(Time, is_dst=False)
-    return Time_UTC
+    if UTC is True:
+    # Set time zone to UTC
+        tz = timezone.utc
+    else:
+    # Get local time zone
+        tz = datetime.now(timezone.utc).astimezone().tzinfo
+        
+    Time_awared = Time.replace(tzinfo=tz)
+    return Time_awared
 
 def GetSunAngle(LonLat, time):
     Sun_zenith = 90 - solar.get_altitude(LonLat[1], LonLat[0], time)
@@ -202,24 +213,42 @@ def GetSunAngle(LonLat, time):
         Sun_azimuth -= 360
     return Sun_zenith, Sun_azimuth
 
+def GetViewAngle(u, v, chunk, camera):
+    ray = chunk.transform.matrix.mulv(GetProjectVector(u, v, camera))
+    R = GetWorldRotMatrix(chunk, camera)
+    ray_unrotated = R.t() * ray
+    View_zenith = degrees(atan2(sqrt(ray_unrotated[0]**2 + ray_unrotated[1]**2), ray_unrotated[2]))
+    # swap x and y axis since 0 degree is to north
+    View_azimuth = degrees(atan2(ray_unrotated[0], ray_unrotated[1]))
+    # Convert negative azimuth angle to positive
+    if View_azimuth < 0:
+        View_azimuth += 360
+    
+    return View_zenith, View_azimuth
+
 def CreateSunViewGeometryArrays(chunk, camera):
     Camera_Depth_Array = GetCameraDepth(chunk, camera)
     width = camera.sensor.width
     height = camera.sensor.height
     Sun_zenith = PhotoScan.Image(width, height, " ", "F32")
     Sun_azimuth = PhotoScan.Image(width, height, " ", "F32")
+    View_zenith = PhotoScan.Image(width, height, " ", "F32")
+    View_azimuth = PhotoScan.Image(width, height, " ", "F32")
     for v in range(height):
         for u in range(width):
             geo_point = GetPixelLocation(u, v, chunk, camera, Camera_Depth_Array, wgs_84)
             Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
-            Sun_zenith[u,v] = (Pixel_Sun_zenith, )
-            Sun_azimuth[u,v] = (Pixel_Sun_azimuth, )
-    return Sun_zenith, Sun_azimuth
+            Pixel_View_zenith, Pixel_View_azimuth = GetViewAngle(u, v, chunk, camera)
+            Sun_zenith[u, v] = (Pixel_Sun_zenith, )
+            Sun_azimuth[u, v] = (Pixel_Sun_azimuth, )
+            View_zenith[u, v] = (Pixel_View_zenith, )
+            View_azimuth[u, v] = (Pixel_View_azimuth, )
+    return Sun_zenith, Sun_azimuth, View_zenith, View_azimuth
 
 def GetWorldRotMatrix(chunk, camera):
     T = chunk.transform.matrix
     m = chunk.crs.localframe(T.mulp(camera.center))
-    R= m * T * camera.transform * PhotoScan.Matrix().Diag([1, -1, -1, 1])
+    R = m * T * camera.transform * PhotoScan.Matrix().Diag([1, -1, -1, 1])
     return R.rotation()
 
 def GetYawPitchRoll(chunk, camera):
