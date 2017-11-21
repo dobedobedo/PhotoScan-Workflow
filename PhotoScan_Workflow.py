@@ -68,7 +68,7 @@ BlendingMode = PhotoScan.BlendingMode.MosaicBlending
 # Variable for calculating date time
 # UTC = True if the timestamp of image is record in UTC
 # Otherwise, local time zone will be used
-UTC = False
+UTC = True
 #######################################################
 
 wgs_84 = PhotoScan.CoordinateSystem("EPSG::4326")
@@ -260,6 +260,28 @@ def GetOmegaPhiKappa(chunk, camera):
     R = GetWorldRotMatrix(chunk, camera)
     omega, phi, kappa = PhotoScan.utils.mat2opk(R)
     return omega, phi, kappa
+
+def GetPointMatchSets(chunk):
+    point_cloud = chunk.point_cloud
+    points = point_cloud.points
+    point_proj = point_cloud.projections
+    npoints = len(points)
+    camera_matches = dict()
+    for camera in chunk.cameras:
+        total = set()
+        point_index = 0
+        proj = point_proj[camera]
+        for cur_point in proj:
+            track_id = cur_point.track_id
+    # Match the point track ID
+            while point_index < npoints and points[point_index].track_id < track_id:
+                point_index += 1
+            if point_index < npoints and points[point_index].track_id == track_id:
+    # Only add valid point matches
+                if point_cloud.points[point_index].valid:
+                    total.add(point_index)
+        camera_matches[camera] = total
+    return camera_matches
 
 # The following process will only be executed when running script    
 if __name__ == '__main__':
