@@ -175,13 +175,13 @@ def GetCameraDepth(chunk, camera):
 def GetProjectVector(u, v, camera):
     pixel = PhotoScan.Vector([u, v])
     # Calculate the vector from sensor centre to pixel (u, v)
-    ray = camera.transform.mulv(camera.sensor.calibration.unproject(pixel))
+    ray = camera.sensor.calibration.unproject(pixel)
     
     return ray
 
 def GetPixelLocation(u, v, chunk, camera, depth_scaled, crs):
     # Get the vector from sensor centre to pixel (u, v)
-    ray = GetProjectVector(u, v, camera)
+    ray = camera.transform.mulv(GetProjectVector(u, v, camera))
     
     # Calculate the pixel location in chunk crs
     chunk_point = camera.center + ray * depth_scaled[u, v][0] / chunk.transform.scale
@@ -214,12 +214,12 @@ def GetSunAngle(LonLat, time):
     return Sun_zenith, Sun_azimuth
 
 def GetViewAngle(u, v, chunk, camera):
-    ray = chunk.transform.matrix.mulv(GetProjectVector(u, v, camera))
+    ray = GetProjectVector(u, v, camera)
     R = GetWorldRotMatrix(chunk, camera)
-    ray_unrotated = R.t() * ray
-    View_zenith = degrees(atan2(sqrt(ray_unrotated[0]**2 + ray_unrotated[1]**2), ray_unrotated[2]))
+    ray_world = R.t() * ray
+    View_zenith = degrees(atan2(sqrt(ray_world[0]**2 + ray_world[1]**2), ray_world[2]))
     # swap x and y axis since 0 degree is to north
-    View_azimuth = degrees(atan2(ray_unrotated[0], ray_unrotated[1]))
+    View_azimuth = degrees(atan2(ray_world[0], -ray_world[1]))
     # Convert negative azimuth angle to positive
     if View_azimuth < 0:
         View_azimuth += 360
@@ -278,10 +278,11 @@ def GetPointMatchSets(chunk):
                 point_index += 1
             if point_index < npoints and points[point_index].track_id == track_id:
     # Only add valid point matches
-                if point_cloud.points[point_index].valid:
+                if points[point_index].valid:
                     total.add(point_index)
         camera_matches[camera] = total
     return camera_matches
+
 
 # The following process will only be executed when running script    
 if __name__ == '__main__':
