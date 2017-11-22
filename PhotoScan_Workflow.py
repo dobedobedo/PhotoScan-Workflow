@@ -218,6 +218,7 @@ def GetViewAngle(u, v, chunk, camera):
     R = GetWorldRotMatrix(chunk, camera)
     ray_world = R.t() * ray
     View_zenith = degrees(atan2(sqrt(ray_world[0]**2 + ray_world[1]**2), ray_world[2]))
+    # give y a negative sign to make 0 toward north
     # swap x and y axis since 0 degree is to north
     View_azimuth = degrees(atan2(ray_world[0], -ray_world[1]))
     # Convert negative azimuth angle to positive
