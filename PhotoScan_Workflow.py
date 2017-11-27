@@ -36,11 +36,13 @@ Therefore, please avoid "_DEM" in your chunk name. Otherwise, it will not be pro
 import PhotoScan
 from datetime import datetime, timezone
 from pysolar import solar
-from math import sqrt, atan2, degrees
+from math import sqrt, atan2, cos, degrees, radians
+from sklearn import linear_model
 
 doc = PhotoScan.app.document
 
-#######################################################
+###############################################################################
+#
 # User variables
 #
 # Variables for photo alignment
@@ -69,7 +71,14 @@ BlendingMode = PhotoScan.BlendingMode.MosaicBlending
 # UTC = True if the timestamp of image is record in UTC
 # Otherwise, local time zone will be used
 UTC = True
-#######################################################
+#
+# Variable for sun angle calculation
+# Pixelwise = True if you wish to calculate the Sun angle for every pixel
+# Otherwise, The sun angle for camera centre will be used to represent whole image
+# It is suggested to turn off pixelwise calculation since the differece is too small
+Pixelwise = False
+#
+###############################################################################
 
 wgs_84 = PhotoScan.CoordinateSystem("EPSG::4326")
 
@@ -231,14 +240,25 @@ def CreateSunViewGeometryArrays(chunk, camera):
     Camera_Depth_Array = GetCameraDepth(chunk, camera)
     width = camera.sensor.width
     height = camera.sensor.height
+    cx = camera.sensor.calibration.cx
+    cy = camera.sensor.calibration.cy
     Sun_zenith = PhotoScan.Image(width, height, " ", "F32")
     Sun_azimuth = PhotoScan.Image(width, height, " ", "F32")
     View_zenith = PhotoScan.Image(width, height, " ", "F32")
     View_azimuth = PhotoScan.Image(width, height, " ", "F32")
+    
+    # Initialise the sun angle calculation for camera centre
+    geo_point = GetPixelLocation(width/2+cx, width/2+cy, chunk, camera, Camera_Depth_Array, wgs_84)
+    Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
+    
     for v in range(height):
         for u in range(width):
-            geo_point = GetPixelLocation(u, v, chunk, camera, Camera_Depth_Array, wgs_84)
-            Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
+            
+    # Recalculate the Sun angle for each pixel if Pixelwise is True
+            if Pixelwise is True:
+                geo_point = GetPixelLocation(u, v, chunk, camera, Camera_Depth_Array, wgs_84)
+                Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
+            
             Pixel_View_zenith, Pixel_View_azimuth = GetViewAngle(u, v, chunk, camera)
             Sun_zenith[u, v] = (Pixel_Sun_zenith, )
             Sun_azimuth[u, v] = (Pixel_Sun_azimuth, )
@@ -262,28 +282,78 @@ def GetOmegaPhiKappa(chunk, camera):
     omega, phi, kappa = PhotoScan.utils.mat2opk(R)
     return omega, phi, kappa
 
-def GetPointMatchSets(chunk):
+def GetPointMatchList(chunk, *band):
     point_cloud = chunk.point_cloud
     points = point_cloud.points
     point_proj = point_cloud.projections
     npoints = len(points)
     camera_matches = dict()
+    point_matches = dict()
     for camera in chunk.cameras:
-        total = set()
+        total = dict()
         point_index = 0
-        proj = point_proj[camera]
+    # If no band number input, only process the master channel
+        try:
+            proj = point_proj[camera.planes[band[0]]]
+        except IndexError:
+            proj = point_proj[camera]
+            
         for cur_point in proj:
             track_id = cur_point.track_id
     # Match the point track ID
             while point_index < npoints and points[point_index].track_id < track_id:
                 point_index += 1
             if point_index < npoints and points[point_index].track_id == track_id:
-    # Only add valid point matches
+    # Only add valid point matches and save their pixel coordinates
                 if points[point_index].valid:
-                    total.add(point_index)
-        camera_matches[camera] = total
-    return camera_matches
+                    total[point_index] = cur_point.coord
+                    try:
+                        point_matches[point_index][camera.planes[band[0]]] = cur_point.coord
+                    except KeyError:
+                        point_matches[point_index] = dict()
+                        try:
+                            point_matches[point_index][camera.planes[band[0]]] = cur_point.coord
+                        except IndexError:
+                            point_matches[point_index][camera] = cur_point.coord
+                    except IndexError:
+                        point_matches[point_index][camera] = cur_point.coord
+        try:
+            camera_matches[camera.planes[band[0]]] = total
+        except IndexError:
+            camera_matches[camera] = total
+    # camera_matches describes point indice and their projected pixel coordinates for each camera
+    # point_matches describes point's pixel coordinates in different cameras for each point
+    return camera_matches, point_matches
 
+def CollateMatchList(camera_matches, point_matches):
+    # Keep tie points which have at least 3 observation in same band
+    point_to_keep = set()
+    new_camera_matches = dict()
+    new_point_matches = dict()
+    for point_index, value in point_matches.items():
+        if len(value) >= 3:
+            new_point_matches[point_index] = value
+            point_to_keep.add(point_index)
+    for camera, points in camera_matches.items():
+        new_camera_matches[camera] = {point: coord for point, coord in iter(points.items()) if point in point_to_keep}
+    return new_camera_matches, new_point_matches
+
+def MultiLinearRegression(point, Sun_azimuth, View_zenith, View_azimuth):
+    cameras = list(point.keys())
+    X = list()
+    Y = list()
+    for camera in cameras:
+        u = point[camera][0]
+        v = point[camera][1]
+        x1 = View_zenith[camera][u, v][0]
+        x2 = View_azimuth[camera][u, v][0]
+        x3 = Sun_azimuth[camera][u, v][0]
+        y = camera.photo.image()[u, v][0]
+        X.append([x1**2, x1*cos(radians(x2-x3))])
+        Y.append(y)
+    clf = linear_model.LinearRegression()
+    model = clf.fit(X, Y)
+    return model
 
 # The following process will only be executed when running script    
 if __name__ == '__main__':
