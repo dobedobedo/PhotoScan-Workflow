@@ -35,7 +35,7 @@ Therefore, please avoid "_DEM" in your chunk name. Otherwise, it will not be pro
 """
 import PhotoScan
 from datetime import datetime, timezone
-from pysolar import solar
+from pysolar.solar import get_altitude, get_azimuth
 from math import sqrt, atan2, cos, degrees, radians
 from sklearn import linear_model
 
@@ -80,7 +80,7 @@ Pixelwise = False
 #
 ###############################################################################
 
-wgs_84 = PhotoScan.CoordinateSystem("EPSG::4326")
+wgs_84 = PhotoScan.CoordinateSystem('EPSG::4326')
 
 def AlignPhoto(chunk, Accuracy, Key_Limit, Tie_Limit):
     chunk.matchPhotos(accuracy=Accuracy, 
@@ -174,7 +174,7 @@ def GetCameraDepth(chunk, camera):
     depth = chunk.model.renderDepth(camera.transform, camera.sensor.calibration)
     
     # Scale the depth array
-    depth_scaled = PhotoScan.Image(depth.width, depth.height, " ", "F32")
+    depth_scaled = PhotoScan.Image(depth.width, depth.height, ' ', 'F32')
     
     for y in range(depth.height):
         for x in range(depth.width):
@@ -214,18 +214,17 @@ def GetDateTime(camera):
     return Time_awared
 
 def GetSunAngle(LonLat, time):
-    Sun_zenith = 90 - solar.get_altitude(LonLat[1], LonLat[0], time)
-    Sun_azimuth_South = solar.get_azimuth(LonLat[1], LonLat[0], time)
+    Sun_zenith = 90 - get_altitude(LonLat[1], LonLat[0], time)
+    Sun_azimuth_South = get_azimuth(LonLat[1], LonLat[0], time)
     # Convert azimuth to zero-to-north
     Sun_azimuth = 180 - Sun_azimuth_South
     if abs(Sun_azimuth) >= 360:
         Sun_azimuth -= 360
     return Sun_zenith, Sun_azimuth
 
-def GetViewAngle(u, v, chunk, camera):
+def GetViewAngle(u, v, R_t, chunk, camera):
     ray = GetProjectVector(u, v, camera)
-    R = GetWorldRotMatrix(chunk, camera)
-    ray_world = R.t() * ray
+    ray_world = R_t * ray
     View_zenith = degrees(atan2(sqrt(ray_world[0]**2 + ray_world[1]**2), ray_world[2]))
     # give y a negative sign to make 0 toward north
     # swap x and y axis since 0 degree is to north
@@ -238,32 +237,31 @@ def GetViewAngle(u, v, chunk, camera):
 
 def CreateSunViewGeometryArrays(chunk, camera):
     Camera_Depth_Array = GetCameraDepth(chunk, camera)
+    R_t = GetWorldRotMatrix(chunk, camera).t()
     width = camera.sensor.width
     height = camera.sensor.height
     cx = camera.sensor.calibration.cx
     cy = camera.sensor.calibration.cy
-    Sun_zenith = PhotoScan.Image(width, height, " ", "F32")
-    Sun_azimuth = PhotoScan.Image(width, height, " ", "F32")
-    View_zenith = PhotoScan.Image(width, height, " ", "F32")
-    View_azimuth = PhotoScan.Image(width, height, " ", "F32")
+    Sun_zenith = PhotoScan.Image(width, height, ' ', 'F32')
+    Sun_azimuth = PhotoScan.Image(width, height, ' ', 'F32')
+    View_zenith = PhotoScan.Image(width, height, ' ', 'F32')
+    View_azimuth = PhotoScan.Image(width, height, ' ', 'F32')
     
     # Initialise the sun angle calculation for camera centre
     geo_point = GetPixelLocation(width/2+cx, width/2+cy, chunk, camera, Camera_Depth_Array, wgs_84)
     Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
-    
-    for v in range(height):
-        for u in range(width):
-            
+
+    for u, v in [(u, v) for u in range(width) for v in range(height)]:
     # Recalculate the Sun angle for each pixel if Pixelwise is True
-            if Pixelwise is True:
-                geo_point = GetPixelLocation(u, v, chunk, camera, Camera_Depth_Array, wgs_84)
-                Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
-            
-            Pixel_View_zenith, Pixel_View_azimuth = GetViewAngle(u, v, chunk, camera)
-            Sun_zenith[u, v] = (Pixel_Sun_zenith, )
-            Sun_azimuth[u, v] = (Pixel_Sun_azimuth, )
-            View_zenith[u, v] = (Pixel_View_zenith, )
-            View_azimuth[u, v] = (Pixel_View_azimuth, )
+        if Pixelwise is True:
+            geo_point = GetPixelLocation(u, v, chunk, camera, Camera_Depth_Array, wgs_84)
+            Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
+        
+        Pixel_View_zenith, Pixel_View_azimuth = GetViewAngle(u, v, R_t, chunk, camera)
+        Sun_zenith[u, v] = (Pixel_Sun_zenith, )
+        Sun_azimuth[u, v] = (Pixel_Sun_azimuth, )
+        View_zenith[u, v] = (Pixel_View_zenith, )
+        View_azimuth[u, v] = (Pixel_View_azimuth, )
     return Sun_zenith, Sun_azimuth, View_zenith, View_azimuth
 
 def GetWorldRotMatrix(chunk, camera):
@@ -338,13 +336,13 @@ def CollateMatchList(camera_matches, point_matches):
         new_camera_matches[camera] = {point: coord for point, coord in iter(points.items()) if point in point_to_keep}
     return new_camera_matches, new_point_matches
 
-def MultiLinearRegression(point, Sun_azimuth, View_zenith, View_azimuth):
-    cameras = list(point.keys())
+def MultiLinearRegression(point_matches, Sun_azimuth, View_zenith, View_azimuth):
+    cameras = point_matches.keys()
     X = list()
     Y = list()
     for camera in cameras:
-        u = point[camera][0]
-        v = point[camera][1]
+        u = point_matches[camera][0]
+        v = point_matches[camera][1]
         x1 = View_zenith[camera][u, v][0]
         x2 = View_azimuth[camera][u, v][0]
         x3 = Sun_azimuth[camera][u, v][0]
@@ -354,6 +352,16 @@ def MultiLinearRegression(point, Sun_azimuth, View_zenith, View_azimuth):
     clf = linear_model.LinearRegression()
     model = clf.fit(X, Y)
     return model
+
+def BRDFcoef(camera, camera_matches, point_matches, Sun_azimuth, View_zenith, View_azimuth):
+    width = camera.sensor.width
+    height = camera.sensor.height
+    BRDFImage = PhotoScan.Image(width, height, 'RGB', 'F32')
+    for point_index, coords in camera_matches[camera].items():
+        model = MultiLinearRegression(point_matches[point_index], 
+                                      Sun_azimuth, View_zenith, View_azimuth)
+        BRDFImage[coords[0], coords[1]] = (model.coef_[0], model.coef_[1], model.intercept_)
+    return BRDFImage
 
 # The following process will only be executed when running script    
 if __name__ == '__main__':
