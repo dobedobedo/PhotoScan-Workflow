@@ -34,10 +34,12 @@ The DEM will be generated in duplicated chunk: "chunk name"_DEM respectively
 Therefore, please avoid "_DEM" in your chunk name. Otherwise, it will not be processed.
 """
 import PhotoScan
+import numpy as np
 from datetime import datetime, timezone
 from pysolar.solar import get_altitude, get_azimuth
 from math import sqrt, atan2, cos, degrees, radians
 from sklearn import linear_model
+from sklearn.cluster import DBSCAN
 
 doc = PhotoScan.app.document
 
@@ -357,11 +359,26 @@ def BRDFcoef(camera, camera_matches, point_matches, Sun_azimuth, View_zenith, Vi
     width = camera.sensor.width
     height = camera.sensor.height
     BRDFImage = PhotoScan.Image(width, height, 'RGB', 'F32')
+    BRDFcoefs = list()
     for point_index, coords in camera_matches[camera].items():
         model = MultiLinearRegression(point_matches[point_index], 
                                       Sun_azimuth, View_zenith, View_azimuth)
-        BRDFImage[coords[0], coords[1]] = (model.coef_[0], model.coef_[1], model.intercept_)
+        BRDFcoefs.append([coords[0], coords[1], model.coef_[0], model.coef_[1], model.intercept_])
+    BRDFcoefs = np.array(BRDFcoefs)
+    denoised = SearchForOutliers(BRDFcoefs)
+    for u, v, a, b, c in denoised:
+        BRDFImage[u, v] = (a, b, c)
     return BRDFImage
+
+
+def SearchForOutliers(data):
+    db = DBSCAN(eps=5000, min_samples=100)
+    db.fit(data[:, 2:5])
+    labels = db.labels_
+    # -1 means noise
+    noise_mask = (labels != -1)
+    denoised = data[noise_mask]
+    return denoised
 
 # The following process will only be executed when running script    
 if __name__ == '__main__':
