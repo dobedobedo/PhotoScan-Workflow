@@ -21,5 +21,6 @@ For a 300 4-band-image (Parrot Sequoia images) project with 9 cm resolution, it 
 - numpy  
 - pysolar  
 - scikit-learn  
+  
 For information of how to install extra Python modules in PhotoScan, check the below link:  
 https://agisoft.freshdesk.com/support/solutions/articles/31000136860-how-to-install-external-python-module-to-photoscan-professional-pacakge  
