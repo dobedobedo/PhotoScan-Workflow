@@ -15,6 +15,9 @@ Run the script in Tools > Run script
 This branch add an experiment feature to correct BRDF effect using Walthal model.  
 To turn on this feature, set the _BRDF_ user variable to _True_. Otherwise, _False_ to turn it off.  
 It will generated BRDF corrected image and use them to create orthomosaic.  
+  
+_Remember to check whether image date time is recorded as UTC, and set the **UTC** user variable **True** if it is_  
+  
 For a 300 4-band-image (Parrot Sequoia images) project with 9 cm resolution, it costs me about one more day to process.  
   
 **Dependencies**  
