@@ -35,11 +35,11 @@ Therefore, please avoid "_DEM" in your chunk name. Otherwise, it will not be pro
 """
 import PhotoScan
 import os
-import imageio
 import numpy as np
+from numpy import cos, radians
 from datetime import datetime, timezone
 from pysolar.solar import get_altitude, get_azimuth
-from math import sqrt, atan2, cos, degrees, radians
+from math import sqrt, atan2, degrees
 from sklearn import linear_model
 from sklearn.cluster import DBSCAN
 from sklearn.mixture import GaussianMixture
@@ -209,7 +209,7 @@ def BRDFCorrection(chunk):
     for band in [band for camera in chunk.cameras for band in camera.planes]:
         filename = band.photo.path
         filename_formatted = os.path.abspath(filename)
-        image_path, image_nameext = os.path.splith(filename)
+        image_path, image_nameext = os.path.split(filename)
         image_name, ext = os.path.splitext(image_nameext)
         new_path = os.path.join(outpath, ''.join([image_name, ext.lower()]))
         new_filename_formatted = os.path.abspath(os.path.join(new_path, image_nameext))
@@ -219,16 +219,22 @@ def BRDFCorrection(chunk):
         elif os.path.exists(new_path):
             band.photo.open(new_path, 0)
         else:
-            band_name = band.sensor.bands[0]
-            New_Image, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth = BRDFImage(chunk, 
-                                                                                      band, 
-                                                                                      camera_matches[band_name], 
-                                                                                      point_matches[band_name], 
-                                                                                      Sun_zenith, Sun_azimuth, 
-                                                                                      View_zenith, View_azimuth)
-            
-            New_Image.save(new_path)
-            band.photo.open(new_path, 0)
+            try:
+                band_name = band.sensor.bands[0]
+                New_Image, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth = BRDFImage(chunk, 
+                                                                                          band, 
+                                                                                          camera_matches[band_name], 
+                                                                                          point_matches[band_name], 
+                                                                                          Sun_zenith, Sun_azimuth, 
+                                                                                          View_zenith, View_azimuth)
+                
+                New_Image.save(new_path)
+                band.photo.open(new_path, 0)
+                
+    # If there is no tie points on either features in photo, it will raise a ValueError 
+    # Disable the respective camera in this case
+            except ValueError:
+                band.enabled = False
 
 def GetCameraDepth(chunk, camera):
     # Get camra depth array from camera location to elevation model
@@ -298,7 +304,6 @@ def GetViewAngle(u, v, R_t, chunk, camera):
     
     return View_zenith, View_azimuth
 
-'''
 def CreateSunViewGeometryArrays(chunk, camera):
     Camera_Depth_Array = GetCameraDepth(chunk, camera)
     R_t = GetWorldRotMatrix(chunk, camera).t()
@@ -306,55 +311,27 @@ def CreateSunViewGeometryArrays(chunk, camera):
     height = camera.sensor.height
     cx = camera.sensor.calibration.cx
     cy = camera.sensor.calibration.cy
-    Sun_zenith = PhotoScan.Image(width, height, ' ', 'F32')
-    Sun_azimuth = PhotoScan.Image(width, height, ' ', 'F32')
-    View_zenith = PhotoScan.Image(width, height, ' ', 'F32')
-    View_azimuth = PhotoScan.Image(width, height, ' ', 'F32')
+    Sun_zenith = np.zeros([height, width])
+    Sun_azimuth = np.zeros([height, width])
+    View_zenith = np.zeros([height, width])
+    View_azimuth = np.zeros([height, width])
+    DateTime = GetDateTime(camera)
     
     # Initialise the sun angle calculation for camera centre
     geo_point = GetPixelLocation(width/2+cx, width/2+cy, chunk, camera, Camera_Depth_Array, wgs_84)
-    Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
+    Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, DateTime)
 
     for u, v in [(u, v) for u in range(width) for v in range(height)]:
     # Recalculate the Sun angle for each pixel if Pixelwise is True
         if Pixelwise is True:
             geo_point = GetPixelLocation(u, v, chunk, camera, Camera_Depth_Array, wgs_84)
-            Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
+            Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, DateTime)
         
         Pixel_View_zenith, Pixel_View_azimuth = GetViewAngle(u, v, R_t, chunk, camera)
-        Sun_zenith[u, v] = (Pixel_Sun_zenith, )
-        Sun_azimuth[u, v] = (Pixel_Sun_azimuth, )
-        View_zenith[u, v] = (Pixel_View_zenith, )
-        View_azimuth[u, v] = (Pixel_View_azimuth, )
-    return Sun_zenith, Sun_azimuth, View_zenith, View_azimuth
-'''
-def CreateSunViewGeometryArrays(chunk, camera):
-    Camera_Depth_Array = GetCameraDepth(chunk, camera)
-    R_t = GetWorldRotMatrix(chunk, camera).t()
-    width = camera.sensor.width
-    height = camera.sensor.height
-    cx = camera.sensor.calibration.cx
-    cy = camera.sensor.calibration.cy
-    Sun_zenith = PhotoScan.Image(width, height, ' ', 'F32')
-    Sun_azimuth = PhotoScan.Image(width, height, ' ', 'F32')
-    View_zenith = PhotoScan.Image(width, height, ' ', 'F32')
-    View_azimuth = PhotoScan.Image(width, height, ' ', 'F32')
-    
-    # Initialise the sun angle calculation for camera centre
-    geo_point = GetPixelLocation(width/2+cx, width/2+cy, chunk, camera, Camera_Depth_Array, wgs_84)
-    Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
-
-    for u, v in [(u, v) for u in range(width) for v in range(height)]:
-    # Recalculate the Sun angle for each pixel if Pixelwise is True
-        if Pixelwise is True:
-            geo_point = GetPixelLocation(u, v, chunk, camera, Camera_Depth_Array, wgs_84)
-            Pixel_Sun_zenith, Pixel_Sun_azimuth = GetSunAngle(geo_point, GetDateTime(camera))
-        
-        Pixel_View_zenith, Pixel_View_azimuth = GetViewAngle(u, v, R_t, chunk, camera)
-        Sun_zenith[u, v] = (Pixel_Sun_zenith, )
-        Sun_azimuth[u, v] = (Pixel_Sun_azimuth, )
-        View_zenith[u, v] = (Pixel_View_zenith, )
-        View_azimuth[u, v] = (Pixel_View_azimuth, )
+        Sun_zenith[v, u] = Pixel_Sun_zenith
+        Sun_azimuth[v, u] = Pixel_Sun_azimuth
+        View_zenith[v, u] = Pixel_View_zenith
+        View_azimuth[v, u] = Pixel_View_azimuth
     return Sun_zenith, Sun_azimuth, View_zenith, View_azimuth
 
 def GetWorldRotMatrix(chunk, camera):
@@ -424,135 +401,59 @@ def MultiLinearRegression(chunk, point_matches, Sun_zenith, Sun_azimuth, View_ze
     X = list()
     Y = list()
     for camera in cameras:
-        u = point_matches[camera][0]
-        v = point_matches[camera][1]
+        u = int(point_matches[camera][0])
+        v = int(point_matches[camera][1])
         try:
-            x1 = View_zenith[camera][u, v][0]
+            x1 = View_zenith[camera][v, u]
         except KeyError:
             Sun_zenith[camera], Sun_azimuth[camera], View_zenith[camera], View_azimuth[camera] \
             = CreateSunViewGeometryArrays(chunk, camera)
-            x1 = View_zenith[camera][u, v][0]
-        x2 = View_azimuth[camera][u, v][0]
-        x3 = Sun_azimuth[camera][u, v][0]
+            x1 = View_zenith[camera][v, u]
+        x2 = View_azimuth[camera][v, u]
+        x3 = Sun_azimuth[camera][v, u]
         y = camera.photo.image()[u, v][0]
         X.append([x1**2, x1*cos(radians(x2-x3))])
         Y.append(y)
     clf = linear_model.LinearRegression()
     model = clf.fit(X, Y)
     return model, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth
-'''
-def BRDFImage(chunk, camera, camera_matches, point_matches, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth):
-    width = camera.sensor.width
-    height = camera.sensor.height
-    Image = camera.photo.image()
-    
-    # In our study, the environment usually contains only two features (ground, vegetation)
-    # Therefore, we predict which feature the pixels belongs to
-    # Then apply different linear model
-    GMM = ImageGaussianMixture(Image)
-    
-    BRDFZenithImage = PhotoScan.Image(width, height, ' ', 'F32')
-    BRDFArray = [[], []]
-    denoised = [[], []]
-        
-    # Solve BRDF for tie points
-    for point_index, coords in camera_matches[camera].items():
-        
-        model, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth = \
-        MultiLinearRegression(chunk, point_matches[point_index], Sun_zenith, Sun_azimuth, View_zenith, View_azimuth)
-        
-        theta = View_zenith[camera][coords[0], coords[1]][0]
-        phi_v = View_azimuth[camera][coords[0], coords[1]][0]
-        phi_s = Sun_azimuth[camera][coords[0], coords[1]][0]
-        y = Image[coords[0], coords[1]][0]
-        x1 = theta**2
-        x2 = theta * cos(radians(phi_v-phi_s))
-        feature = GMM.predict(y)[0]
-        if feature == 0:
-            BRDFArray[0].append([coords[0], coords[1], y, x1, x2, model.coef_[0], model.coef_[1], model.intercept_])
-        else:
-            BRDFArray[1].append([coords[0], coords[1], y, x1, x2, model.coef_[0], model.coef_[1], model.intercept_])
-    
-    # Store BRDF coefficients in different arrays for different features and denoise
-    for i in range(2):
-        BRDFArray[i] = np.array(BRDFArray[i])
-        denoised[i] = SearchForOutliers(BRDFArray[i])
-    
-    # Create linear models for different features
-    X0 = np.column_stack((denoised[0][:, 2], 
-                          denoised[0][:, 3], 
-                          denoised[0][:, 4]))
-    X1 = np.column_stack((denoised[1][:, 2], 
-                          denoised[1][:, 3], 
-                          denoised[1][:, 4]))
-    clf0 = linear_model.LinearRegression(fit_intercept=False)
-    clf1 = linear_model.LinearRegression(fit_intercept=False)
-    clf0.fit(X0, denoised[0][:, 7])
-    clf1.fit(X1, denoised[1][:, 7])
-    
-    # Use known observations to predict unknown Walthal BRDF zenith observation for each pixels
-    for u, v in [(u, v) for u in range(width) for v in range(height)]:
-        y = Image[u, v][0]
-        feature = GMM.predict(y)
-        if feature == 0:
-            index = np.where(denoised[0][:,0].all()==u and denoised[0][:,1].all()==v)
-            i = 0
-            try:
-                data = denoised[i][index][0]
-                BRDFZenithImage[u, v] = (data[7], )
-            except IndexError:
-                theta = View_zenith[camera][u, v][0]
-                phi_v = View_azimuth[camera][u, v][0]
-                phi_s = Sun_azimuth[camera][u, v][0]
-                x1 = theta**2
-                x2 = theta * cos(radians(phi_v-phi_s))
-                c = clf0.predict([[y, x1, x2]])[0]
-                BRDFZenithImage[u, v] = (c, )
-        else:
-            index = np.where(denoised[0][:,0].all()==u and denoised[0][:,1].all()==v)
-            i = 1
-            try:
-                data = denoised[i][index][0]
-                BRDFZenithImage[u, v] = (data[7], )
-            except IndexError:
-                theta = View_zenith[camera][u, v][0]
-                phi_v = View_azimuth[camera][u, v][0]
-                phi_s = Sun_azimuth[camera][u, v][0]
-                x1 = theta**2
-                x2 = theta * cos(radians(phi_v-phi_s))
-                c = clf1.predict([[y, x1, x2]])[0]
-                BRDFZenithImage[u, v] = (c, )
-    
-    return BRDFZenithImage
-'''
 
 def BRDFImage(chunk, camera, camera_matches, point_matches, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth):
     width = camera.sensor.width
     height = camera.sensor.height
-    image_path = camera.photo.path
-    Image = imageio.imread(image_path)
-    dtype = {'U8':np.uint8, 'U16':np.uint16, 'U32':np.uint32, 'F32':np.float32, 'F64':np.float64}
-    PhotoScan_Imtype = list(dtype.keys())[list(dtype.values()).index(Image.dtype)]
+    
+    # Because PhotoScan crashes when using numpy image IO
+    # I have no choice but assign values pixelwisely
+    Image = camera.photo.image()
+    Image_array = np.zeros([height, width])
+    for u, v in [(u, v) for u in range(width) for v in range(height)]:
+        Image_array[v, u] = Image[u, v][0]
+        
+    datatype = {'U8':np.uint8, 'U16':np.uint16, 'U32':np.uint32, 'F32':np.float32, 'F64':np.float64}
+    PhotoScan_Imtype = Image.data_type
+    Imtype = datatype[PhotoScan_Imtype]
     
     # In our study, the environment usually contains only two features (ground, vegetation)
     # Therefore, we predict which feature the pixels belongs to
     # Then apply different linear model
-    GMM = ImageGaussianMixture(Image)
+    GMM = ImageGaussianMixture(Image_array)
     
-    BRDFZenithImage = PhotoScan.Image(width, height, ' ', 'F32')
+    BRDFZenithImage = PhotoScan.Image(width, height, ' ', PhotoScan_Imtype)
     BRDFArray = [[], []]
     denoised = [[], []]
         
     # Solve BRDF for tie points
     for point_index, coords in camera_matches[camera].items():
+        u = int(coords[0])
+        v = int(coords[1])
         
         model, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth = \
         MultiLinearRegression(chunk, point_matches[point_index], Sun_zenith, Sun_azimuth, View_zenith, View_azimuth)
         
-        theta = View_zenith[camera][coords[0], coords[1]][0]
-        phi_v = View_azimuth[camera][coords[0], coords[1]][0]
-        phi_s = Sun_azimuth[camera][coords[0], coords[1]][0]
-        y = Image[coords[0], coords[1]][0]
+        theta = View_zenith[camera][v, u]
+        phi_v = View_azimuth[camera][v, u]
+        phi_s = Sun_azimuth[camera][v, u]
+        y = Image[u, v][0]
         x1 = theta**2
         x2 = theta * cos(radians(phi_v-phi_s))
         feature = GMM.predict(y)[0]
@@ -579,37 +480,24 @@ def BRDFImage(chunk, camera, camera_matches, point_matches, Sun_zenith, Sun_azim
     clf1.fit(X1, denoised[1][:, 7])
     
     # Use known observations to predict unknown Walthal BRDF zenith observation for each pixels
+    # Different linear models are applied to different features based on DN value
+    features = GMM.predict(Image_array.reshape(-1, 1)).reshape(height, width)
+    BRDFZenithArray = ZenithPredict(Image_array, features, 
+                                    Sun_azimuth[camera], View_zenith[camera], View_azimuth[camera], 
+                                    clf0, clf1)
+    
+    # Clip Image in the range of data type max and min
+    try:
+        dtype_max = np.iinfo(Imtype).max
+        dtype_min = np.iinfo(Imtype).min
+    except ValueError:
+        dtype_max = np.finfo(Imtype).max
+        dtype_min = np.finfo(Imtype).min
+    np.clip(BRDFZenithArray, dtype_min, dtype_max, BRDFZenithArray)
+    
+    # Assign values to PhotoScan Image format pixelwisely
     for u, v in [(u, v) for u in range(width) for v in range(height)]:
-        y = Image[u, v][0]
-        feature = GMM.predict(y)
-        if feature == 0:
-            index = np.where(denoised[0][:,0].all()==u and denoised[0][:,1].all()==v)
-            i = 0
-            try:
-                data = denoised[i][index][0]
-                BRDFZenithImage[u, v] = (data[7], )
-            except IndexError:
-                theta = View_zenith[camera][u, v][0]
-                phi_v = View_azimuth[camera][u, v][0]
-                phi_s = Sun_azimuth[camera][u, v][0]
-                x1 = theta**2
-                x2 = theta * cos(radians(phi_v-phi_s))
-                c = clf0.predict([[y, x1, x2]])[0]
-                BRDFZenithImage[u, v] = (c, )
-        else:
-            index = np.where(denoised[0][:,0].all()==u and denoised[0][:,1].all()==v)
-            i = 1
-            try:
-                data = denoised[i][index][0]
-                BRDFZenithImage[u, v] = (data[7], )
-            except IndexError:
-                theta = View_zenith[camera][u, v][0]
-                phi_v = View_azimuth[camera][u, v][0]
-                phi_s = Sun_azimuth[camera][u, v][0]
-                x1 = theta**2
-                x2 = theta * cos(radians(phi_v-phi_s))
-                c = clf1.predict([[y, x1, x2]])[0]
-                BRDFZenithImage[u, v] = (c, )
+        BRDFZenithImage[u, v] = (BRDFZenithArray[v, u], )
     
     return BRDFZenithImage, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth
 
@@ -621,19 +509,9 @@ def SearchForOutliers(data):
     noise_mask = (labels != -1)
     denoised = data[noise_mask]
     return denoised
-'''
+
 def ImageGaussianMixture(image):
-    width = image.width
-    height = image.height
-    DNs = list()
-    for u, v in [(u, v) for u in range(width) for v in range(height)]:
-        DNs.append([image[u, v][0]])
-    GMM = GaussianMixture(n_components=2)
-    GMM.fit(DNs)
-    return GMM
-'''
-def ImageGaussianMixture(image):
-    # image is numpy array
+    # image is a numpy array
     # reshape to n samples m features by reshape(n, m)
     GMM = GaussianMixture(n_components=2)
     try:
@@ -643,6 +521,31 @@ def ImageGaussianMixture(image):
         GMM.fit(image.reshape(-1, 1))
         
     return GMM
+
+def ZenithPredict(Image_array, features, Sun_azimuth, View_zenith, View_azimuth, clf0, clf1):
+    rows, cols = Image_array.shape
+    
+    x1 = View_zenith ** 2
+    x2 = View_zenith * cos(radians(View_azimuth - Sun_azimuth))
+    samples = np.column_stack((Image_array.reshape(-1, 1),
+                               x1.reshape(-1, 1),
+                               x2.reshape(-1, 1)))
+    
+    # Create two image arrays. 
+    # New_image0 is for feature 0, New_image1 is for feature1
+    New_image0 = clf0.predict(samples).reshape(rows, cols)
+    New_image1 = clf1.predict(samples).reshape(rows, cols)
+    
+    # Create a conditional vectorised function to determine which pixel values should be returned
+    def func(Image0, Image1, features):
+        if features == 0:
+            return Image0
+        else:
+            return Image1
+    vfunc = np.vectorize(func)
+    
+    New_image_array = vfunc(New_image0, New_image1, features)
+    return New_image_array
 
 # The following process will only be executed when running script    
 if __name__ == '__main__':
