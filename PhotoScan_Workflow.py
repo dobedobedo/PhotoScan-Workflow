@@ -197,15 +197,23 @@ def BRDFCorrection(chunk):
     View_azimuth = dict()
     bands = list()
     
+    # Get band information
     for band in chunk.cameras[0].planes:
         bands.append(band.sensor.bands[0])
     
+    # Calculate the tie points tables
     for index, band_name in enumerate(bands):
         cameras, points = GetPointMatchList(chunk, index)
         cameras, points = CollateMatchList(cameras, points)
         camera_matches[band_name] = cameras
         point_matches[band_name] = points
     
+    # Calculate Sun View angles arrays for every images
+    for band in [band for camera in chunk.cameras for band in camera.planes]:
+        Sun_zenith[band], Sun_azimuth[band], View_zenith[band], View_azimuth[band] = \
+        CreateSunViewGeometryArrays(chunk, band)
+    
+    # Calculate BRDF corrected image
     for band in [band for camera in chunk.cameras for band in camera.planes]:
         filename = band.photo.path
         filename_formatted = os.path.abspath(filename)
@@ -221,12 +229,9 @@ def BRDFCorrection(chunk):
         else:
             try:
                 band_name = band.sensor.bands[0]
-                New_Image, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth = BRDFImage(chunk, 
-                                                                                          band, 
-                                                                                          camera_matches[band_name], 
-                                                                                          point_matches[band_name], 
-                                                                                          Sun_zenith, Sun_azimuth, 
-                                                                                          View_zenith, View_azimuth)
+                New_Image = BRDFImage(chunk, band, 
+                                      camera_matches[band_name], point_matches[band_name], 
+                                      Sun_azimuth, View_zenith, View_azimuth)
                 
                 New_Image.save(new_path)
                 band.photo.open(new_path, 0)
@@ -396,19 +401,15 @@ def CollateMatchList(camera_matches, point_matches):
         new_camera_matches[camera] = {point: coord for point, coord in iter(points.items()) if point in point_to_keep}
     return new_camera_matches, new_point_matches
 
-def MultiLinearRegression(chunk, point_matches, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth):
+def MultiLinearRegression(chunk, point_matches, Sun_azimuth, View_zenith, View_azimuth):
     cameras = point_matches.keys()
     X = list()
     Y = list()
     for camera in cameras:
         u = int(point_matches[camera][0])
         v = int(point_matches[camera][1])
-        try:
-            x1 = View_zenith[camera][v, u]
-        except KeyError:
-            Sun_zenith[camera], Sun_azimuth[camera], View_zenith[camera], View_azimuth[camera] \
-            = CreateSunViewGeometryArrays(chunk, camera)
-            x1 = View_zenith[camera][v, u]
+        
+        x1 = View_zenith[camera][v, u]
         x2 = View_azimuth[camera][v, u]
         x3 = Sun_azimuth[camera][v, u]
         y = camera.photo.image()[u, v][0]
@@ -416,9 +417,9 @@ def MultiLinearRegression(chunk, point_matches, Sun_zenith, Sun_azimuth, View_ze
         Y.append(y)
     clf = linear_model.LinearRegression()
     model = clf.fit(X, Y)
-    return model, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth
+    return model
 
-def BRDFImage(chunk, camera, camera_matches, point_matches, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth):
+def BRDFImage(chunk, camera, camera_matches, point_matches, Sun_azimuth, View_zenith, View_azimuth):
     width = camera.sensor.width
     height = camera.sensor.height
     
@@ -447,8 +448,7 @@ def BRDFImage(chunk, camera, camera_matches, point_matches, Sun_zenith, Sun_azim
         u = int(coords[0])
         v = int(coords[1])
         
-        model, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth = \
-        MultiLinearRegression(chunk, point_matches[point_index], Sun_zenith, Sun_azimuth, View_zenith, View_azimuth)
+        model = MultiLinearRegression(chunk, point_matches[point_index], Sun_azimuth, View_zenith, View_azimuth)
         
         theta = View_zenith[camera][v, u]
         phi_v = View_azimuth[camera][v, u]
@@ -499,7 +499,7 @@ def BRDFImage(chunk, camera, camera_matches, point_matches, Sun_zenith, Sun_azim
     for u, v in [(u, v) for u in range(width) for v in range(height)]:
         BRDFZenithImage[u, v] = (BRDFZenithArray[v, u], )
     
-    return BRDFZenithImage, Sun_zenith, Sun_azimuth, View_zenith, View_azimuth
+    return BRDFZenithImage
 
 def SearchForOutliers(data):
     db = DBSCAN(eps=5000, min_samples=100)
