@@ -18,7 +18,7 @@ It will generated BRDF corrected image and use them to create orthomosaic.
   
 _Remember to check whether image date time is recorded as UTC, and set the **UTC** user variable **True** if it is_  
   
-For a 300 4-band-image (Parrot Sequoia images) project with 9 cm resolution, it costs me about one more day to process.  
+For a 300 4-band-image (Parrot Sequoia images) project with 9 cm resolution, it costs me about two more days to process.  
   
 **Dependencies**  
 - numpy  
