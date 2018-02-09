@@ -7,6 +7,7 @@ Created on Thu Nov  9 13:21:23 2017
 
 This Python Script is developed for Agisoft PhotoScan 1.3.4
 Python core is 3.5.2
+Update: Add compatibility of PhotoScan 1.4.0
 
 This script runs through all chunks and will do the following:
     1. Align Photos if there's no tie point
@@ -70,7 +71,9 @@ Cell_Size = 10
 #
 # Variable for building orthomosaic
 # Blending: AverageBlending, MosaicBlending, MinBlending, MaxBlending, DisabledBlending
+# Color_correction: True, False
 BlendingMode = PhotoScan.BlendingMode.MosaicBlending
+Color_correction = True
 #
 # Variable for calculating date time
 # UTC = True if the timestamp of image is record in UTC
@@ -100,10 +103,16 @@ def AlignPhoto(chunk, Accuracy, Key_Limit, Tie_Limit):
     chunk.alignCameras(adaptive_fitting=True)
     
 def BuildDenseCloud(chunk, Quality, FilterMode):
-    chunk.buildDenseCloud(quality=Quality, 
-                          filter= FilterMode, 
-                          keep_depth=False, 
-                          reuse_depth=False)
+    try:
+        chunk.buildDenseCloud(quality=Quality, 
+                              filter= FilterMode, 
+                              keep_depth=False, 
+                              reuse_depth=False)
+    except:
+        chunk.buildDepthMaps(quality=Quality,
+                             filter=FilterMode,
+                             reuse_depth=False)
+        chunk.buildDenseCloud(point_colors=True)
     
 def ClassifyGround(chunk, Max_Angle, Cell_Size):
     DEM_resolution, Image_resolution = GetResolution(chunk)
@@ -119,22 +128,38 @@ def BuildModel(chunk):
                      vertex_colors=True)
     
 def BuildDSM(chunk):
-    chunk.buildDem(source=PhotoScan.DataSource.DenseCloudData, 
-                   interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
-                   projection = chunk.crs)    
+    try:
+        chunk.buildDem(source=PhotoScan.DataSource.DenseCloudData, 
+                       interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
+                       projection = chunk.crs)
+    except:
+        chunk.buildDem(source=PhotoScan.DataSource.DenseCloudData, 
+                       interpolation=PhotoScan.Interpolation.EnabledInterpolation)
 
 def BuildDEM(chunk):
-    chunk.buildDem(source=PhotoScan.DataSource.DenseCloudData, 
-                   interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
-                   projection = chunk.crs,
-                   classes=[PhotoScan.PointClass.Ground])
+    try:
+        chunk.buildDem(source=PhotoScan.DataSource.DenseCloudData, 
+                       interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
+                       projection = chunk.crs,
+                       classes=[PhotoScan.PointClass.Ground])
+    except:
+        chunk.buildDem(source=PhotoScan.DataSource.DenseCloudData, 
+                       interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
+                       classes=[PhotoScan.PointClass.Ground])
     
 def BuildMosaic(chunk, BlendingMode):
-    chunk.buildOrthomosaic(surface=PhotoScan.DataSource.ElevationData, 
-                           blending=BlendingMode, 
-                           color_correction=True, 
-                           fill_holes=True, 
-                           projection= chunk.crs)
+    try:
+        chunk.buildOrthomosaic(surface=PhotoScan.DataSource.ElevationData, 
+                               blending=BlendingMode, 
+                               color_correction=Color_correction, 
+                               fill_holes=True, 
+                               projection= chunk.crs)
+    except:
+        if Color_correction:
+            chunk.calibrateColors(source_data=PhotoScan.DataSource.ModelData, color_balance=True)
+        chunk.buildOrthomosaic(surface=PhotoScan.DataSource.ElevationData, 
+                               blending=BlendingMode,  
+                               fill_holes=True)
     
 def StandardWorkflow(doc, chunk, **kwargs):
     doc.save()
