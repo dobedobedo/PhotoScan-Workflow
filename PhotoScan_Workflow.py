@@ -71,7 +71,9 @@ Cell_Size = 10
 #
 # Variable for building orthomosaic
 # Blending: AverageBlending, MosaicBlending, MinBlending, MaxBlending, DisabledBlending
+# Color_correction: True, False
 BlendingMode = PhotoScan.BlendingMode.MosaicBlending
+Color_correction = True
 #
 # Variable for calculating date time
 # UTC = True if the timestamp of image is record in UTC
@@ -149,10 +151,12 @@ def BuildMosaic(chunk, BlendingMode):
     try:
         chunk.buildOrthomosaic(surface=PhotoScan.DataSource.ElevationData, 
                                blending=BlendingMode, 
-                               color_correction=True, 
+                               color_correction=Color_correction, 
                                fill_holes=True, 
                                projection= chunk.crs)
     except:
+        if Color_correction:
+            chunk.calibrateColors(source_data=PhotoScan.DataSource.ModelData, color_balance=True)
         chunk.buildOrthomosaic(surface=PhotoScan.DataSource.ElevationData, 
                                blending=BlendingMode,  
                                fill_holes=True)
