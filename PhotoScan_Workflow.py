@@ -149,6 +149,7 @@ def StandardWorkflow(doc, chunk, **kwargs):
     # Must save before classification. Otherwise it fails.
             doc.save()
             ClassifyGround(chunk, kwargs['Max_Angle'], kwargs['Cell_Size'])
+            doc.save()
         if chunk.model is None:
             BuildModel(chunk)
         doc.save()
