@@ -11,6 +11,10 @@ The GCP must be marked manually, following camera optimisation
 You can change some variables in the script for specific purposes  
 Run the script in Tools > Run script
   
+**Enable NIR tie points only**  
+Some studies show enabling only NIR tie points can improve photogrammetric point clouds quality.  
+To turn on this feature, set the _NIR_only_ user variable to _True_.
+  
 **Extra Correction**  
 This branch add an experiment feature to correct BRDF effect using Walthal model.  
 To turn on this feature, set the _BRDF_ user variable to _True_. Otherwise, _False_ to turn it off.  
