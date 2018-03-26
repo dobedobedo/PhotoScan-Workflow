@@ -58,8 +58,10 @@ Key_Limit = 40000
 Tie_Limit = 10000
 #
 # Variables for building dense cloud
+# NIR_only: True or False, whether to keep only tie points from NIR band to improve quality of trees' model
 # Quality: UltraQuality, HighQuality, MediumQuality, LowQuality, LowestQuality
 # Filter: AggressiveFiltering, ModerateFiltering, MildFiltering, NoFiltering
+NIR_only = False
 Quality = PhotoScan.Quality.HighQuality
 FilterMode = PhotoScan.FilterMode.MildFiltering
 #
@@ -88,7 +90,7 @@ Pixelwise = False
 #
 # Variable for Walthal BRDF correction
 # Use for produce BRDF zenith image
-BRDF = True
+BRDF = False
 ###############################################################################
 
 wgs_84 = PhotoScan.CoordinateSystem('EPSG::4326')
@@ -169,6 +171,19 @@ def StandardWorkflow(doc, chunk, **kwargs):
         pass
     else:
         if chunk.dense_cloud is None:
+    # Disable tie points except from NIR band to improve dense clouse quality on trees
+            if NIR_only:
+                tie_points = chunk.point_cloud.points
+                npoints = len(tie_points)
+                cameras, points = GetPointMatchList(chunk, 3)
+                cameras, points = CollateMatchList(cameras, points)
+                enabled_points = list()
+                for point_index in sorted(points.keys()):
+                    enabled_points.append(int(point_index))
+                disabled_points = list(set(range(npoints)) - set(enabled_points))
+                for point_index in disabled_points:
+                    tie_points[point_index].valid = False
+                
             BuildDenseCloud(chunk, kwargs['Quality'], kwargs['FilterMode'])
     # Must save before classification. Otherwise it fails.
             doc.save()
@@ -393,19 +408,18 @@ def GetPointMatchList(chunk, *band):
             while point_index < npoints and points[point_index].track_id < track_id:
                 point_index += 1
             if point_index < npoints and points[point_index].track_id == track_id:
-    # Only add valid point matches and save their pixel coordinates
-                if points[point_index].valid:
-                    total[point_index] = cur_point.coord
+    # Add point matches and save their pixel coordinates to list
+                total[point_index] = cur_point.coord
+                try:
+                    point_matches[point_index][camera.planes[band[0]]] = cur_point.coord
+                except KeyError:
+                    point_matches[point_index] = dict()
                     try:
                         point_matches[point_index][camera.planes[band[0]]] = cur_point.coord
-                    except KeyError:
-                        point_matches[point_index] = dict()
-                        try:
-                            point_matches[point_index][camera.planes[band[0]]] = cur_point.coord
-                        except IndexError:
-                            point_matches[point_index][camera] = cur_point.coord
                     except IndexError:
                         point_matches[point_index][camera] = cur_point.coord
+                except IndexError:
+                    point_matches[point_index][camera] = cur_point.coord
         try:
             camera_matches[camera.planes[band[0]]] = total
         except IndexError:
@@ -528,7 +542,7 @@ def BRDFImage(chunk, camera, camera_matches, point_matches, Sun_azimuth, View_ze
     return BRDFZenithImage
 
 def SearchForOutliers(data):
-    db = DBSCAN(eps=5000, min_samples=100)
+    db = DBSCAN(eps=5000)
     db.fit(data[:, 5:8])
     labels = db.labels_
     # -1 means noise
