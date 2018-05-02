@@ -60,10 +60,13 @@ Max_Angle = 13
 Cell_Size = 10
 #
 # Variable for building orthomosaic
+# Since 1.4.0, users can choose performing color correction (vignetting) and balance separately.
 # Blending: AverageBlending, MosaicBlending, MinBlending, MaxBlending, DisabledBlending
 # Color_correction: True, False
+# Color_balance: True, False
 BlendingMode = PhotoScan.BlendingMode.MosaicBlending
 Color_correction = True
+Color_balance = False
 #
 #######################################################
 
@@ -132,7 +135,7 @@ def BuildMosaic(chunk, BlendingMode):
                                projection= chunk.crs)
     except:
         if Color_correction:
-            chunk.calibrateColors(source_data=PhotoScan.DataSource.ModelData, color_balance=True)
+            chunk.calibrateColors(source_data=PhotoScan.DataSource.ModelData, color_balance=Color_balance)
         chunk.buildOrthomosaic(surface=PhotoScan.DataSource.ElevationData, 
                                blending=BlendingMode,  
                                fill_holes=True)
