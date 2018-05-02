@@ -265,25 +265,28 @@ def BRDFCorrection(chunk):
         image_name, ext = os.path.splitext(image_nameext)
         new_path = os.path.join(outpath, ''.join([image_name, ext.lower()]))
         new_filename_formatted = os.path.abspath(os.path.join(new_path, image_nameext))
-        
-        if filename_formatted == new_filename_formatted:
-            continue
-        elif os.path.exists(new_path):
-            band.photo.open(new_path, 0)
-        else:
-            try:
-                band_name = band.sensor.bands[0]
-                New_Image = BRDFImage(chunk, band, 
-                                      camera_matches[band_name], point_matches[band_name], 
-                                      Sun_azimuth, View_zenith, View_azimuth)
-                
-                New_Image.save(new_path)
+        try:
+            if band.group.label == 'Calibration images':
+                continue
+        except AttributeError:
+            if filename_formatted == new_filename_formatted:
+                continue
+            elif os.path.exists(new_path):
                 band.photo.open(new_path, 0)
-                
+            else:
+                try:
+                    band_name = band.sensor.bands[0]
+                    New_Image = BRDFImage(chunk, band, 
+                                          camera_matches[band_name], point_matches[band_name], 
+                                          Sun_azimuth, View_zenith, View_azimuth)
+                    
+                    New_Image.save(new_path)
+                    band.photo.open(new_path, 0)
+                    
     # If there is no tie points on either features in photo, it will raise a ValueError 
     # Disable the respective camera in this case
-            except ValueError:
-                band.enabled = False
+                except ValueError:
+                    band.enabled = False
 
 def GetCameraDepth(chunk, camera):
     # Get camra depth array from camera location to elevation model
