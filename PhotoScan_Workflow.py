@@ -5,13 +5,17 @@ Created on Thu Nov  9 13:21:23 2017
 
 @author: Yu-Hsuan Tu
 
-This Python Script is developed for Agisoft PhotoScan 1.3.4
+This Python Script is developed for Agisoft PhotoScan (current MetaShape) 1.3.4
 Python core is 3.5.2
+
+11 January 2019 Update: Add compatibility of MetaShape 1.5.0
 Update: Add compatibility of PhotoScan 1.4.0
 
 This script runs through all chunks and will do the following:
     1. Align Photos if there's no tie point
     2. Do the standard process if there is tie point
+
+When aligning photos, users can decide whether using image quality to disable bad photos
 
 GCP needs to be marked manually
 
@@ -34,7 +38,11 @@ All chunks will be applied.
 The DEM will be generated in duplicated chunk: "chunk name"_DEM respectively
 Therefore, please avoid "_DEM" in your chunk name. Otherwise, it will not be processed.
 """
-import PhotoScan
+try:
+    import Metashape as PhotoScan
+except ImportError:
+    import PhotoScan
+
 import os
 import numpy as np
 from numpy import cos, radians
@@ -50,6 +58,12 @@ doc = PhotoScan.app.document
 ###############################################################################
 #
 # User variables
+#
+# Variables for image quality filter
+# QualityFilter: True, False
+# QualityCriteria: float number range from 0 to 1 (default 0.5)
+QualityFilter = True
+QualityCriteria = 0.5
 #
 # Variables for photo alignment
 # Accuracy: HighestAccuracy, HighAccuracy, MediumAccuracy, LowAccuracy, LowestAccuracy
@@ -98,7 +112,13 @@ BRDF = False
 
 wgs_84 = PhotoScan.CoordinateSystem('EPSG::4326')
 
-def AlignPhoto(chunk, Accuracy, Key_Limit, Tie_Limit):
+def AlignPhoto(chunk, Accuracy, Key_Limit, Tie_Limit, QualityFilter, QualityCriteria):
+    if QualityFilter:
+        if chunk.cameras[0].meta['Image/Quality'] is None:
+            chunk.estimateImageQuality()
+        for band in [band for camera in chunk.cameras for band in camera.planes]:
+            if float(band.meta['Image/Quality']) < QualityCriteria:
+                band.enabled = False
     chunk.matchPhotos(accuracy=Accuracy, 
                       generic_preselection=True, 
                       reference_preselection=True, 

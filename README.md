@@ -1,5 +1,5 @@
 # PhotoScan-Workflow
-Python Script for automation in Agisoft PhotoScan
+Python Script for automation in Agisoft MetaShape (previous PhotoScan) Pro
   
 # Usage  
 This script will process all chunks with the following behaviour:  
