@@ -8,6 +8,8 @@ Created on Thu Nov  9 13:21:23 2017
 This Python Script is developed for Agisoft PhotoScan (current MetaShape) 1.3.4
 Python core is 3.5.2
 
+22 October 2019 Update: Add tie point error reduction following the USGS guidline
+                        Add the 3D model parameters to user variables
 11 January 2019 Update: Add compatibility of MetaShape 1.5.0
 Update: Add compatibility of PhotoScan 1.4.0
 
@@ -51,14 +53,14 @@ doc = PhotoScan.app.document
 # Variables for image quality filter
 # QualityFilter: True, False
 # QualityCriteria: float number range from 0 to 1 (default 0.5)
-QualityFilter = True
+QualityFilter = False
 QualityCriteria = 0.5
 #
 # Variables for photo alignment
 # Accuracy: HighestAccuracy, HighAccuracy, MediumAccuracy, LowAccuracy, LowestAccuracy
 Accuracy = PhotoScan.Accuracy.HighAccuracy
-Key_Limit = 40000
-Tie_Limit = 10000
+Key_Limit = 60000
+Tie_Limit = 0
 #
 # Variables for building dense cloud
 # Quality: UltraQuality, HighQuality, MediumQuality, LowQuality, LowestQuality
@@ -71,6 +73,12 @@ FilterMode = PhotoScan.FilterMode.MildFiltering
 # Which will be calculated later
 Max_Angle = 13
 Cell_Size = 10
+#
+# Variable for building 3D mesh
+# Surface: Arbitrary, HeightField
+# SurfaceSource: PointCloudData, DenseCloudData, DepthMapsData
+Surface = PhotoScan.SurfaceType.Arbitrary
+SurfaceSource = PhotoScan.DataSource.DepthMapsData
 #
 # Variable for building orthomosaic
 # Since 1.4.0, users can choose performing color correction (vignetting) and balance separately.
@@ -98,7 +106,11 @@ def AlignPhoto(chunk, Accuracy, Key_Limit, Tie_Limit, QualityFilter, QualityCrit
                       filter_mask=False, 
                       keypoint_limit=Key_Limit, 
                       tiepoint_limit=Tie_Limit)
-    chunk.alignCameras(adaptive_fitting=True)
+    chunk.alignCameras()
+    chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
+                          fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
+                          fit_p1=True, fit_p2=True, fit_p3=False, fit_p4=False, 
+                          adaptive_fitting=False, tiepoint_covariance=False)
     
 def BuildDenseCloud(chunk, Quality, FilterMode):
     try:
@@ -119,11 +131,18 @@ def ClassifyGround(chunk, Max_Angle, Cell_Size):
                                            cell_size=Cell_Size)
     
 def BuildModel(chunk):
-    chunk.buildModel(surface=PhotoScan.SurfaceType.HeightField, 
-                     interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
-                     face_count=PhotoScan.FaceCount.HighFaceCount, 
-                     source=PhotoScan.DataSource.DenseCloudData, 
-                     vertex_colors=True)
+    try:
+        chunk.buildModel(surface=Surface, 
+                         interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
+                         face_count=PhotoScan.FaceCount.HighFaceCount, 
+                         source=SurfaceSource, 
+                         vertex_colors=True)
+    except:
+        chunk.buildModel(surface=Surface, 
+                         interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
+                         face_count=PhotoScan.FaceCount.HighFaceCount, 
+                         source=PhotoScan.DataSource.DenseCloudData, 
+                         vertex_colors=True)
     
 def BuildDSM(chunk):
     try:
@@ -199,6 +218,75 @@ def GetResolution(chunk):
     Image_resolution = DEM_resolution / int(chunk.dense_cloud.meta['dense_cloud/depth_downscale'])
     return DEM_resolution, Image_resolution
 
+def ReduceError_RU(chunk, init_threshold=10):
+    # This is used to reduce error based on reconstruction uncertainty
+    tie_points = chunk.point_cloud
+    fltr = PhotoScan.PointCloud.Filter()
+    fltr.init(chunk, PhotoScan.PointCloud.Filter.ReconstructionUncertainty)
+    threshold = init_threshold
+    while fltr.max_value > 10:
+        fltr.selectPoints(threshold)
+        nselected = len([p for p in tie_points.points if p.selected])
+        if nselected >= len(tie_points.points) / 2 and threshold <= 50:
+            fltr.resetSelection()
+            threshold += 1
+            continue
+        tie_points.removeSelectedPoints()
+        chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
+                              fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
+                              fit_p1=True, fit_p2=True, fit_p3=False, fit_p4=False, 
+                              adaptive_fitting=False, tiepoint_covariance=False)
+        fltr.init(chunk, PhotoScan.PointCloud.Filter.ReconstructionUncertainty)
+        threshold = init_threshold
+        
+def ReduceError_PA(chunk, init_threshold=2.0):
+    # This is used to reduce error based on projection accuracy
+    tie_points = chunk.point_cloud
+    fltr = PhotoScan.PointCloud.Filter()
+    fltr.init(chunk, PhotoScan.PointCloud.Filter.ProjectionAccuracy)
+    threshold = init_threshold
+    while fltr.max_value > 2.0:
+        fltr.selectPoints(threshold)
+        nselected = len([p for p in tie_points.points if p.selected])
+        if nselected >= len(tie_points.points) / 2 and threshold <= 3.0:
+            fltr.resetSelection()
+            threshold += 0.1
+            continue
+        tie_points.removeSelectedPoints()
+        chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
+                              fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
+                              fit_p1=True, fit_p2=True, fit_p3=False, fit_p4=False, 
+                              adaptive_fitting=False, tiepoint_covariance=False)
+        fltr.init(chunk, PhotoScan.PointCloud.Filter.ProjectionAccuracy)
+        threshold = init_threshold
+    # This is to tighten tie point accuracy value
+    chunk.tiepoint_accuracy = 0.1
+    chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=True, fit_b2=True, 
+                          fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=True, 
+                          fit_p1=True, fit_p2=True, fit_p3=True, fit_p4=True, 
+                          adaptive_fitting=False, tiepoint_covariance=False)
+    
+def ReduceError_RE(chunk, init_threshold=0.3):
+    # This is used to reduce error based on repeojection error
+    tie_points = chunk.point_cloud
+    fltr = PhotoScan.PointCloud.Filter()
+    fltr.init(chunk, PhotoScan.PointCloud.Filter.ReprojectionError)
+    threshold = init_threshold
+    while fltr.max_value > 0.3:
+        fltr.selectPoints(threshold)
+        nselected = len([p for p in tie_points.points if p.selected])
+        if nselected >= len(tie_points.points) / 10:
+            fltr.resetSelection()
+            threshold += 0.01
+            continue
+        tie_points.removeSelectedPoints()
+        chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
+                              fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
+                              fit_p1=True, fit_p2=True, fit_p3=False, fit_p4=False, 
+                              adaptive_fitting=False, tiepoint_covariance=False)
+        fltr.init(chunk, PhotoScan.PointCloud.Filter.ReprojectionError)
+        threshold = init_threshold
+
 # The following process will only be executed when running script    
 if __name__ == '__main__':
     # Initialising listing chunks
@@ -211,9 +299,12 @@ if __name__ == '__main__':
     # Align Photo only if it is not done yet
         if chunk.point_cloud is None:
             AlignPhoto(chunk, Accuracy, Key_Limit, Tie_Limit)
+            ReduceError_RU(chunk)
+            ReduceError_PA(chunk)
             
     # Do the rest when there's tie point
         else:
+            ReduceError_RE(chunk)
             StandardWorkflow(doc, chunk, 
                              Quality=Quality, FilterMode=FilterMode, 
                              Max_Angle=Max_Angle, Cell_Size=Cell_Size, 
