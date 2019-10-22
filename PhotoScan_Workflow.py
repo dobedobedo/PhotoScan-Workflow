@@ -280,9 +280,9 @@ def ReduceError_RE(chunk, init_threshold=0.3):
             threshold += 0.01
             continue
         tie_points.removeSelectedPoints()
-        chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
-                              fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
-                              fit_p1=True, fit_p2=True, fit_p3=False, fit_p4=False, 
+        chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=True, fit_b2=True, 
+                              fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=True, 
+                              fit_p1=True, fit_p2=True, fit_p3=True, fit_p4=True, 
                               adaptive_fitting=False, tiepoint_covariance=False)
         fltr.init(chunk, PhotoScan.PointCloud.Filter.ReprojectionError)
         threshold = init_threshold
