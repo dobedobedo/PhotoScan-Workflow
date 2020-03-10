@@ -231,6 +231,11 @@ def ReduceError_RU(chunk, init_threshold=10):
             fltr.resetSelection()
             threshold += 1
             continue
+        UnselectPointMatch(chunk)
+        nselected = len([p for p in tie_points.points if p.selected])
+        if nselected == 0:
+            break
+        print('Delete {} tie point(s)'.format(nselected))
         tie_points.removeSelectedPoints()
         chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
                               fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
@@ -252,6 +257,11 @@ def ReduceError_PA(chunk, init_threshold=2.0):
             fltr.resetSelection()
             threshold += 0.1
             continue
+        UnselectPointMatch(chunk)
+        nselected = len([p for p in tie_points.points if p.selected])
+        if nselected == 0:
+            break
+        print('Delete {} tie point(s)'.format(nselected))
         tie_points.removeSelectedPoints()
         chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
                               fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
@@ -279,6 +289,11 @@ def ReduceError_RE(chunk, init_threshold=0.3):
             fltr.resetSelection()
             threshold += 0.01
             continue
+        UnselectPointMatch(chunk)
+        nselected = len([p for p in tie_points.points if p.selected])
+        if nselected == 0:
+            break
+        print('Delete {} tie point(s)'.format(nselected))
         tie_points.removeSelectedPoints()
         chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=True, fit_b2=True, 
                               fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=True, 
@@ -287,6 +302,44 @@ def ReduceError_RE(chunk, init_threshold=0.3):
         fltr.init(chunk, PhotoScan.PointCloud.Filter.ReprojectionError)
         threshold = init_threshold
 
+def UnselectPointMatch(chunk, *band):
+    point_cloud = chunk.point_cloud
+    points = point_cloud.points
+    point_proj = point_cloud.projections
+    npoints = len(points)
+
+    n_proj = dict()
+    point_ids = [-1] * npoints
+
+
+    for point_id in range(0, len(points)):
+        point_ids[points[point_id].track_id] = point_id
+
+    # Find the point ID using projections' track ID
+    for camera in chunk.cameras:
+        if camera.type != PhotoScan.Camera.Type.Regular:
+            continue
+        if not camera.transform:
+            continue
+
+        for proj in point_proj[camera]:
+            track_id = proj.track_id
+            point_id = point_ids[track_id]
+            if point_id < 0:
+                continue
+            if not points[point_id].valid:
+                continue
+
+            if point_id in n_proj.keys():
+                n_proj[point_id] += 1
+            else:
+                n_proj[point_id] = 1
+
+    # Unselect points which have less than three projections
+    for i in n_proj.keys():
+        if n_proj[i] < 3:
+            points[i].selected = False
+        
 # The following process will only be executed when running script    
 if __name__ == '__main__':
     # Initialising listing chunks
