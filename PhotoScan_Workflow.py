@@ -309,10 +309,10 @@ def UnselectPointMatch(chunk, *band):
     npoints = len(points)
 
     n_proj = dict()
-    point_ids = [-1] * npoints
+    point_ids = [-1] * len(point_cloud.tracks)
 
 
-    for point_id in range(0, len(points)):
+    for point_id in range(0, npoints):
         point_ids[points[point_id].track_id] = point_id
 
     # Find the point ID using projections' track ID
