@@ -8,6 +8,7 @@ Created on Thu Nov  9 13:21:23 2017
 This Python Script is developed for Agisoft PhotoScan (current MetaShape) 1.3.4
 Python core is 3.5.2
 
+21 Auguest 2020 Update: Add compatibility of Metashape 1.6
 22 October 2019 Update: Add tie point error reduction following the USGS guidline
                         Add the 3D model parameters to user variables
 11 January 2019 Update: Add compatibility of MetaShape 1.5.0
@@ -58,14 +59,14 @@ QualityCriteria = 0.5
 #
 # Variables for photo alignment
 # Accuracy: HighestAccuracy, HighAccuracy, MediumAccuracy, LowAccuracy, LowestAccuracy
-Accuracy = PhotoScan.Accuracy.HighAccuracy
+Accuracy = 'HighAccuracy'
 Key_Limit = 60000
 Tie_Limit = 0
 #
 # Variables for building dense cloud
 # Quality: UltraQuality, HighQuality, MediumQuality, LowQuality, LowestQuality
 # Filter: AggressiveFiltering, ModerateFiltering, MildFiltering, NoFiltering
-Quality = PhotoScan.Quality.HighQuality
+Quality = 'HighQuality'
 FilterMode = PhotoScan.FilterMode.MildFiltering
 #
 # Variables for dense cloud ground point classification
@@ -90,6 +91,20 @@ Color_correction = True
 Color_balance = False
 #
 #######################################################
+#
+# Try to set the correct arguments for photo match accuracy and dense cloud quality
+try:
+    AccuracyDict = {'HighestAccuracy':PhotoScan.Accuracy.HighestAccuracy, 'HighAccuracy':PhotoScan.Accuracy.HighAccuracy, 
+                    'MediumAccuracy':PhotoScan.Accuracy.MediumAccuracy, 'LowAccuracy':PhotoScan.Accuracy.LowAccuracy, 
+                    'LowestAccuracy':PhotoScan.Accuracy.LowestAccuracy}
+    QualityDict = {'UltraQuality':PhotoScan.Quality.UltraQuality, 'HighQuality':PhotoScan.Quality.HighQuality, 
+                   'MediumQuality':PhotoScan.Quality.MediumQuality, 'LowQuality':PhotoScan.Quality.LowQuality, 
+                   'LowestQuality':PhotoScan.Quality.LowestQuality}
+except AttributeError:
+    AccuracyDict = {'HighestAccuracy':0.25, 'HighAccuracy':1, 'MediumAccuracy':4, 'LowAccuracy':16, 'LowestAccuracy':64}
+    QualityDict = {'UltraQuality':1, 'HighQuality':4, 'MediumQuality':16, 'LowQuality':64, 'LowestQuality':256}
+Accuracy = AccuracyDict[Accuracy]
+Quality = QualityDict[Quality]
 
 wgs_84 = PhotoScan.CoordinateSystem("EPSG::4326")
 
@@ -100,12 +115,20 @@ def AlignPhoto(chunk, Accuracy, Key_Limit, Tie_Limit, QualityFilter, QualityCrit
         for band in [band for camera in chunk.cameras for band in camera.planes]:
             if float(band.meta['Image/Quality']) < QualityCriteria:
                 band.enabled = False
-    chunk.matchPhotos(accuracy=Accuracy, 
-                      generic_preselection=True, 
-                      reference_preselection=True, 
-                      filter_mask=False, 
-                      keypoint_limit=Key_Limit, 
-                      tiepoint_limit=Tie_Limit)
+    try:
+        chunk.matchPhotos(accuracy=Accuracy, 
+                          generic_preselection=True, 
+                          reference_preselection=True, 
+                          filter_mask=False, 
+                          keypoint_limit=Key_Limit, 
+                          tiepoint_limit=Tie_Limit)
+    except:
+        chunk.matchPhotos(downscale=Accuracy, 
+                          generic_preselection=True, 
+                          reference_preselection=True, 
+                          filter_mask=False, 
+                          keypoint_limit=Key_Limit, 
+                          tiepoint_limit=Tie_Limit)
     chunk.alignCameras()
     chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
                           fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
@@ -119,10 +142,16 @@ def BuildDenseCloud(chunk, Quality, FilterMode):
                               keep_depth=False, 
                               reuse_depth=False)
     except:
-        chunk.buildDepthMaps(quality=Quality,
-                             filter=FilterMode,
-                             reuse_depth=False)
-        chunk.buildDenseCloud(point_colors=True)
+        try:
+            chunk.buildDepthMaps(quality=Quality,
+                                 filter=FilterMode,
+                                 reuse_depth=False)
+            chunk.buildDenseCloud(point_colors=True)
+        except:
+            chunk.buildDepthMaps(downscale=Quality,
+                                 filter_mode=FilterMode,
+                                 reuse_depth=False)
+            chunk.buildDenseCloud(point_colors=True)
     
 def ClassifyGround(chunk, Max_Angle, Cell_Size):
     DEM_resolution, Image_resolution = GetResolution(chunk)
