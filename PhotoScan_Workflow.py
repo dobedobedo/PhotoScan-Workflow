@@ -5,9 +5,11 @@ Created on Thu Nov  9 13:21:23 2017
 
 @author: Yu-Hsuan Tu
 
-This Python Script is developed for Agisoft PhotoScan (current MetaShape) 1.3.4
-Python core is 3.5.2
+This Python Script was originally developed for Agisoft PhotoScan (current MetaShape) 1.3.4
+Python core was 3.5.2.
+It was later adapted to Metashape 1.8.2 with Python core 3.8.11 on March 2022.
 
+20 March   2022 Update: Clean up the script to different modules and adapt to Metashape 1.8
 21 Auguest 2020 Update: Add compatibility of Metashape 1.6
 22 October 2019 Update: Add tie point error reduction following the USGS guidline
                         Add the 3D model parameters to user variables
@@ -16,40 +18,46 @@ Update: Add compatibility of PhotoScan 1.4.0
 
 This script runs through all chunks and will do the following:
     1. Align Photos if there's no tie point
-    2. Do the standard process if there is tie point
+    2. Do the rest of standard procedure if there is tie point
 
 When aligning photos, users can decide whether using image quality to disable bad photos
 
-GCP needs to be marked manually
-
-Prerequisites for standard workflow:
-    1. Set CRS
-    2. Photo alignment
+Manual intervene for standard workflow:
+    1. Load photos
+    2. Set CRS
     3. Marking GCP
-    4. Optimse Camera
-    5. Set Region
+    4. Set Region
 
 The standard workflow includes:
     Build dense point cloud
-    Point cloud classification
-    Build model
+    Ground point classification
+    Build model and texture (optional)
     Build DSM
     Build DEM
     Build orthomosaic
-    
-All chunks will be applied.
-The DEM will be generated in duplicated chunk: "chunk name"_DEM respectively
+
+In early versions, the DEM will be generated in duplicated chunk: "chunk name"_DEM respectively
 Therefore, please avoid "_DEM" in your chunk name. Otherwise, it will not be processed.
+DEM will be created by duplicating DSM and build with ground point in the same chunk in supported versions.
 """
+
 try:
-    import Metashape as PhotoScan
+    import Metashape as ps
 except ImportError:
-    import PhotoScan
+    import PhotoScan as ps
 
-doc = PhotoScan.app.document
+from Modules import sop
 
-#######################################################
+###############################################################################
+#
 # User variables
+#
+###############################################################################
+# This section is for variables of SOP
+#
+# Variable to check if the script will be executed for all chunks
+# all_chunk: True, False
+all_chunk = False
 #
 # Variables for image quality filter
 # QualityFilter: True, False
@@ -60,335 +68,91 @@ QualityCriteria = 0.5
 # Variables for photo alignment
 # Accuracy: HighestAccuracy, HighAccuracy, MediumAccuracy, LowAccuracy, LowestAccuracy
 Accuracy = 'HighAccuracy'
-Key_Limit = 60000
-Tie_Limit = 0
+Key_Limit = 40000
+Tie_Limit = 4000
+#
+# Variable for tie point error reduction
+# error_reduction: True, False
+error_reduction = False
 #
 # Variables for building dense cloud
 # Quality: UltraQuality, HighQuality, MediumQuality, LowQuality, LowestQuality
 # Filter: AggressiveFiltering, ModerateFiltering, MildFiltering, NoFiltering
-Quality = 'HighQuality'
-FilterMode = PhotoScan.FilterMode.MildFiltering
+Quality = 'UltraQuality'
+FilterMode = ps.FilterMode.MildFiltering
 #
 # Variables for dense cloud ground point classification
 # Maximum distance is usually twice of image resolution
 # Which will be calculated later
 Max_Angle = 13
 Cell_Size = 10
+Ero_Radius = 0.05
 #
-# Variable for building 3D mesh
+# Variable for building 3D mesh and texture
+# create_model: True, False
 # Surface: Arbitrary, HeightField
 # SurfaceSource: PointCloudData, DenseCloudData, DepthMapsData
-Surface = PhotoScan.SurfaceType.Arbitrary
-SurfaceSource = PhotoScan.DataSource.DepthMapsData
+# uv_mapping: GenericMapping, OrthophotoMapping, AdaptiveOrthophotoMapping, SphericalMapping, CameraMapping
+# texture_blending: AverageBlending, MosaicBlending, MinBlending, MaxBlending, DisabledBlending
+create_model = False
+Surface = ps.SurfaceType.Arbitrary
+SurfaceSource = ps.DataSource.DenseCloudData
+uv_mapping = ps.GenericMapping
+texture_blending = ps.BlendingMode.MosaicBlending
+texture_size = 4096
+#
+# Variable for building DSM and DEM
+# ElevationSurface: PointCloudData, DenseCloudData
+ElevationSource = ps.DataSource.DenseCloudData
 #
 # Variable for building orthomosaic
 # Since 1.4.0, users can choose performing color correction (vignetting) and balance separately.
 # Blending: AverageBlending, MosaicBlending, MinBlending, MaxBlending, DisabledBlending
 # Color_correction: True, False
+# correction_source: PointCloudData, ElevationData
 # Color_balance: True, False
-BlendingMode = PhotoScan.BlendingMode.MosaicBlending
+BlendingMode = ps.BlendingMode.MosaicBlending
 Color_correction = True
+correction_source = ps.DataSource.ElevationData
 Color_balance = False
 #
-#######################################################
+###############################################################################
+# This section is for variables of extra correction
 #
-# Try to set the correct arguments for photo match accuracy and dense cloud quality
-try:
-    AccuracyDict = {'HighestAccuracy':PhotoScan.Accuracy.HighestAccuracy, 'HighAccuracy':PhotoScan.Accuracy.HighAccuracy, 
-                    'MediumAccuracy':PhotoScan.Accuracy.MediumAccuracy, 'LowAccuracy':PhotoScan.Accuracy.LowAccuracy, 
-                    'LowestAccuracy':PhotoScan.Accuracy.LowestAccuracy}
-    QualityDict = {'UltraQuality':PhotoScan.Quality.UltraQuality, 'HighQuality':PhotoScan.Quality.HighQuality, 
-                   'MediumQuality':PhotoScan.Quality.MediumQuality, 'LowQuality':PhotoScan.Quality.LowQuality, 
-                   'LowestQuality':PhotoScan.Quality.LowestQuality}
-except AttributeError:
-    AccuracyDict = {'HighestAccuracy':0.25, 'HighAccuracy':1, 'MediumAccuracy':4, 'LowAccuracy':16, 'LowestAccuracy':64}
-    QualityDict = {'UltraQuality':1, 'HighQuality':4, 'MediumQuality':16, 'LowQuality':64, 'LowestQuality':256}
-Accuracy = AccuracyDict[Accuracy]
-Quality = QualityDict[Quality]
+# Variable for calculating date time
+# UTC = True if the timestamp of image is record in UTC
+# Otherwise, local time zone will be used
+UTC = True
+#
+# Variable for sun angle calculation
+# Pixelwise = True if you wish to calculate the Sun angle for every pixel
+# Otherwise, The sun angle for camera centre will be used to represent whole image
+# It is suggested to turn off pixelwise calculation since the differece is too small
+Pixelwise = False
+#
+# Variable for Walthal BRDF correction
+# Use for produce BRDF zenith image
+BRDF = False
+###############################################################################
+#
 
-wgs_84 = PhotoScan.CoordinateSystem("EPSG::4326")
-
-def AlignPhoto(chunk, Accuracy, Key_Limit, Tie_Limit, QualityFilter, QualityCriteria):
-    if QualityFilter:
-        if chunk.cameras[0].meta['Image/Quality'] is None:
-            chunk.estimateImageQuality()
-        for band in [band for camera in chunk.cameras for band in camera.planes]:
-            if float(band.meta['Image/Quality']) < QualityCriteria:
-                band.enabled = False
-    try:
-        chunk.matchPhotos(accuracy=Accuracy, 
-                          generic_preselection=True, 
-                          reference_preselection=True, 
-                          filter_mask=False, 
-                          keypoint_limit=Key_Limit, 
-                          tiepoint_limit=Tie_Limit)
-    except:
-        chunk.matchPhotos(downscale=Accuracy, 
-                          generic_preselection=True, 
-                          reference_preselection=True, 
-                          filter_mask=False, 
-                          keypoint_limit=Key_Limit, 
-                          tiepoint_limit=Tie_Limit)
-    chunk.alignCameras()
-    chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
-                          fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
-                          fit_p1=True, fit_p2=True, fit_p3=False, fit_p4=False, 
-                          adaptive_fitting=False, tiepoint_covariance=False)
-    
-def BuildDenseCloud(chunk, Quality, FilterMode):
-    try:
-        chunk.buildDenseCloud(quality=Quality, 
-                              filter= FilterMode, 
-                              keep_depth=False, 
-                              reuse_depth=False)
-    except:
-        try:
-            chunk.buildDepthMaps(quality=Quality,
-                                 filter=FilterMode,
-                                 reuse_depth=False)
-            chunk.buildDenseCloud(point_colors=True)
-        except:
-            chunk.buildDepthMaps(downscale=Quality,
-                                 filter_mode=FilterMode,
-                                 reuse_depth=False)
-            chunk.buildDenseCloud(point_colors=True)
-    
-def ClassifyGround(chunk, Max_Angle, Cell_Size):
-    DEM_resolution, Image_resolution = GetResolution(chunk)
-    chunk.dense_cloud.classifyGroundPoints(max_angle=Max_Angle, 
-                                           max_distance=2*Image_resolution, 
-                                           cell_size=Cell_Size)
-    
-def BuildModel(chunk):
-    try:
-        chunk.buildModel(surface=Surface, 
-                         interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
-                         face_count=PhotoScan.FaceCount.HighFaceCount, 
-                         source=SurfaceSource, 
-                         vertex_colors=True)
-    except:
-        chunk.buildModel(surface=Surface, 
-                         interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
-                         face_count=PhotoScan.FaceCount.HighFaceCount, 
-                         source=PhotoScan.DataSource.DenseCloudData, 
-                         vertex_colors=True)
-    
-def BuildDSM(chunk):
-    try:
-        chunk.buildDem(source=PhotoScan.DataSource.DenseCloudData, 
-                       interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
-                       projection = chunk.crs)
-    except:
-        chunk.buildDem(source=PhotoScan.DataSource.DenseCloudData, 
-                       interpolation=PhotoScan.Interpolation.EnabledInterpolation)
-
-def BuildDEM(chunk):
-    try:
-        chunk.buildDem(source=PhotoScan.DataSource.DenseCloudData, 
-                       interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
-                       projection = chunk.crs,
-                       classes=[PhotoScan.PointClass.Ground])
-    except:
-        chunk.buildDem(source=PhotoScan.DataSource.DenseCloudData, 
-                       interpolation=PhotoScan.Interpolation.EnabledInterpolation, 
-                       classes=[PhotoScan.PointClass.Ground])
-    
-def BuildMosaic(chunk, BlendingMode):
-    try:
-        chunk.buildOrthomosaic(surface=PhotoScan.DataSource.ElevationData, 
-                               blending=BlendingMode, 
-                               color_correction=Color_correction, 
-                               fill_holes=True, 
-                               projection= chunk.crs)
-    except:
-        if Color_correction:
-            chunk.calibrateColors(source_data=PhotoScan.DataSource.ModelData, color_balance=Color_balance)
-        chunk.buildOrthomosaic(surface=PhotoScan.DataSource.ElevationData, 
-                               blending=BlendingMode,  
-                               fill_holes=True)
-    
-def StandardWorkflow(doc, chunk, **kwargs):
-    doc.save()
-    
-    # Skip the chunk if it is the DEM chunk we created
-    if '_DEM' in chunk.label:
-        pass
-    else:
-        if chunk.dense_cloud is None:
-            BuildDenseCloud(chunk, kwargs['Quality'], kwargs['FilterMode'])
-    # Must save before classification. Otherwise it fails.
-            doc.save()
-            ClassifyGround(chunk, kwargs['Max_Angle'], kwargs['Cell_Size'])
-            doc.save()
-        if chunk.model is None:
-            BuildModel(chunk)
-        doc.save()
-        
-        if chunk.elevation is None:
-            BuildDSM(chunk)
-        
-    # Because each chunk can only contain one elevation data
-    # Therefore, we need to duplicate the chunk to create DEM
-            new_chunk = chunk.copy(items=[PhotoScan.DataSource.DenseCloudData])
-            new_chunk.label = chunk.label + '_DEM'
-            doc.save()
-            BuildDEM(new_chunk)
-        doc.save()
-        
-    # Change the active chunk back
-        doc.chunk = chunk
-        
-        if chunk.orthomosaic is None:
-            BuildMosaic(chunk, kwargs['BlendingMode'])
-        doc.save()
-
-def GetResolution(chunk):
-    DEM_resolution = float(chunk.dense_cloud.meta['dense_cloud/resolution']) * chunk.transform.scale
-    Image_resolution = DEM_resolution / int(chunk.dense_cloud.meta['dense_cloud/depth_downscale'])
-    return DEM_resolution, Image_resolution
-
-def ReduceError_RU(chunk, init_threshold=10):
-    # This is used to reduce error based on reconstruction uncertainty
-    tie_points = chunk.point_cloud
-    fltr = PhotoScan.PointCloud.Filter()
-    fltr.init(chunk, PhotoScan.PointCloud.Filter.ReconstructionUncertainty)
-    threshold = init_threshold
-    while fltr.max_value > 10:
-        fltr.selectPoints(threshold)
-        nselected = len([p for p in tie_points.points if p.selected])
-        if nselected >= len(tie_points.points) / 2 and threshold <= 50:
-            fltr.resetSelection()
-            threshold += 1
-            continue
-        UnselectPointMatch(chunk)
-        nselected = len([p for p in tie_points.points if p.selected])
-        if nselected == 0:
-            break
-        print('Delete {} tie point(s)'.format(nselected))
-        tie_points.removeSelectedPoints()
-        chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
-                              fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
-                              fit_p1=True, fit_p2=True, fit_p3=False, fit_p4=False, 
-                              adaptive_fitting=False, tiepoint_covariance=False)
-        fltr.init(chunk, PhotoScan.PointCloud.Filter.ReconstructionUncertainty)
-        threshold = init_threshold
-        
-def ReduceError_PA(chunk, init_threshold=2.0):
-    # This is used to reduce error based on projection accuracy
-    tie_points = chunk.point_cloud
-    fltr = PhotoScan.PointCloud.Filter()
-    fltr.init(chunk, PhotoScan.PointCloud.Filter.ProjectionAccuracy)
-    threshold = init_threshold
-    while fltr.max_value > 2.0:
-        fltr.selectPoints(threshold)
-        nselected = len([p for p in tie_points.points if p.selected])
-        if nselected >= len(tie_points.points) / 2 and threshold <= 3.0:
-            fltr.resetSelection()
-            threshold += 0.1
-            continue
-        UnselectPointMatch(chunk)
-        nselected = len([p for p in tie_points.points if p.selected])
-        if nselected == 0:
-            break
-        print('Delete {} tie point(s)'.format(nselected))
-        tie_points.removeSelectedPoints()
-        chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=False, fit_b2=False, 
-                              fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=False, 
-                              fit_p1=True, fit_p2=True, fit_p3=False, fit_p4=False, 
-                              adaptive_fitting=False, tiepoint_covariance=False)
-        fltr.init(chunk, PhotoScan.PointCloud.Filter.ProjectionAccuracy)
-        threshold = init_threshold
-    # This is to tighten tie point accuracy value
-    chunk.tiepoint_accuracy = 0.1
-    chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=True, fit_b2=True, 
-                          fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=True, 
-                          fit_p1=True, fit_p2=True, fit_p3=True, fit_p4=True, 
-                          adaptive_fitting=False, tiepoint_covariance=False)
-    
-def ReduceError_RE(chunk, init_threshold=0.3):
-    # This is used to reduce error based on repeojection error
-    tie_points = chunk.point_cloud
-    fltr = PhotoScan.PointCloud.Filter()
-    fltr.init(chunk, PhotoScan.PointCloud.Filter.ReprojectionError)
-    threshold = init_threshold
-    while fltr.max_value > 0.3:
-        fltr.selectPoints(threshold)
-        nselected = len([p for p in tie_points.points if p.selected])
-        if nselected >= len(tie_points.points) / 10:
-            fltr.resetSelection()
-            threshold += 0.01
-            continue
-        UnselectPointMatch(chunk)
-        nselected = len([p for p in tie_points.points if p.selected])
-        if nselected == 0:
-            break
-        print('Delete {} tie point(s)'.format(nselected))
-        tie_points.removeSelectedPoints()
-        chunk.optimizeCameras(fit_f=True, fit_cx=True, fit_cy=True, fit_b1=True, fit_b2=True, 
-                              fit_k1=True, fit_k2=True, fit_k3=True, fit_k4=True, 
-                              fit_p1=True, fit_p2=True, fit_p3=True, fit_p4=True, 
-                              adaptive_fitting=False, tiepoint_covariance=False)
-        fltr.init(chunk, PhotoScan.PointCloud.Filter.ReprojectionError)
-        threshold = init_threshold
-
-def UnselectPointMatch(chunk, *band):
-    point_cloud = chunk.point_cloud
-    points = point_cloud.points
-    point_proj = point_cloud.projections
-    npoints = len(points)
-
-    n_proj = dict()
-    point_ids = [-1] * len(point_cloud.tracks)
-
-
-    for point_id in range(0, npoints):
-        point_ids[points[point_id].track_id] = point_id
-
-    # Find the point ID using projections' track ID
-    for camera in chunk.cameras:
-        if camera.type != PhotoScan.Camera.Type.Regular:
-            continue
-        if not camera.transform:
-            continue
-
-        for proj in point_proj[camera]:
-            track_id = proj.track_id
-            point_id = point_ids[track_id]
-            if point_id < 0:
-                continue
-            if not points[point_id].valid:
-                continue
-
-            if point_id in n_proj.keys():
-                n_proj[point_id] += 1
-            else:
-                n_proj[point_id] = 1
-
-    # Unselect points which have less than three projections
-    for i in n_proj.keys():
-        if n_proj[i] < 3:
-            points[i].selected = False
-        
 # The following process will only be executed when running script    
 if __name__ == '__main__':
-    # Initialising listing chunks
-    chunk_list = doc.chunks
-        
-    # Loop for all initial chunks
-    for chunk in chunk_list:
-        doc.chunk = chunk
-        
-    # Align Photo only if it is not done yet
-        if chunk.point_cloud is None:
-            AlignPhoto(chunk, Accuracy, Key_Limit, Tie_Limit)
-            ReduceError_RU(chunk)
-            ReduceError_PA(chunk)
-            
-    # Do the rest when there's tie point
-        else:
-            ReduceError_RE(chunk)
-            StandardWorkflow(doc, chunk, 
-                             Quality=Quality, FilterMode=FilterMode, 
-                             Max_Angle=Max_Angle, Cell_Size=Cell_Size, 
-                             BlendingMode=BlendingMode)
-    
+    doc = ps.app.document
+
+    # Prompt the user to select CRS
+    crs = ps.app.getCoordinateSystem('Select coordinate system', ps.CoordinateSystem('EPSG::4326'))
+
+    # Run SOP workflow
+    sop.run(doc, all_chunk=all_chunk, error_reduction=error_reduction, create_model=create_model,
+            QualityFilter=QualityFilter, QualityCriteria=QualityCriteria, crs=crs,
+            Accuracy=Accuracy, Key_Limit=Key_Limit, Tie_Limit=Tie_Limit,
+            Quality=Quality, FilterMode=FilterMode,
+            Max_Angle=Max_Angle, Cell_Size=Cell_Size, Ero_Radius=Ero_Radius,
+            Surface=Surface, SurfaceSource=SurfaceSource,
+            uv_mapping=uv_mapping, texture_blending=texture_blending, texture_size=texture_size,
+            ElevationSource=ElevationSource,
+            BlendingMode=BlendingMode, Color_correction=Color_correction, correction_source=correction_source,
+            Color_balance=Color_balance)
+
+    ps.app.update()

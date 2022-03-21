@@ -1,5 +1,6 @@
 # PhotoScan-Workflow
-Python Script for automation in Agisoft MetaShape (previous PhotoScan) Pro
+Python Script for automation in Agisoft MetaShape (previous PhotoScan) Pro  
+The script should work from version 1.3 to 1.8.  
   
 # Usage  
 This script will process all chunks with the following behaviour:  
