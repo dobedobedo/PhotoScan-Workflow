@@ -173,3 +173,8 @@ def UnselectPointMatch(chunk):
                 n_proj[point_id] += 1
             else:
                 n_proj[point_id] = 1
+
+    # Unselect points which have less than three projections
+    for i in n_proj.keys():
+        if n_proj[i] < 3:
+            points[i].selected = False
