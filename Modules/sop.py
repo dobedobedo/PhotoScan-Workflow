@@ -6,7 +6,8 @@ Created on Thu Nov  9 13:21:23 2017
 @author: Yu-Hsuan Tu
 
 This Python Script was originally developed for Agisoft PhotoScan (current MetaShape) 1.3.4
-Python core is 3.5.2. It was later adapted to Metashape 1.8.2 with Python core 3.8.11 on March 2022.
+Python core was 3.5.2.
+It was later adapted to Metashape 1.8.2 with Python core 3.8.11 on March 2022.
 
 20 March   2022 Update: Clean up the script to different modules and adapt to Metashape 1.8
 21 Auguest 2020 Update: Add compatibility of Metashape 1.6
@@ -17,28 +18,24 @@ Update: Add compatibility of PhotoScan 1.4.0
 
 This script runs through all chunks and will do the following:
     1. Align Photos if there's no tie point
-    2. Do the standard process if there is tie point
+    2. Do the rest of standard procedure if there is tie point
 
 When aligning photos, users can decide whether using image quality to disable bad photos
 
-GCP needs to be marked manually
-
-Prerequisites for standard workflow:
-    1. Set CRS
-    2. Photo alignment
+Manual intervene for standard workflow:
+    1. Load photos
+    2. Set CRS
     3. Marking GCP
-    4. Optimse Camera
-    5. Set Region
+    4. Set Region
 
 The standard workflow includes:
     Build dense point cloud
-    Point cloud classification
-    Build model
+    Ground point classification
+    Build model and texture (optional)
     Build DSM
     Build DEM
     Build orthomosaic
 
-All chunks will be applied.
 In early versions, the DEM will be generated in duplicated chunk: "chunk name"_DEM respectively
 Therefore, please avoid "_DEM" in your chunk name. Otherwise, it will not be processed.
 DEM will be created by duplicating DSM and build with ground point in the same chunk in supported versions.
