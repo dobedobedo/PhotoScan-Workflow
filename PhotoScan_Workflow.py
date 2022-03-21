@@ -117,24 +117,6 @@ correction_source = ps.DataSource.ElevationData
 Color_balance = False
 #
 ###############################################################################
-# This section is for variables of extra correction
-#
-# Variable for calculating date time
-# UTC = True if the timestamp of image is record in UTC
-# Otherwise, local time zone will be used
-UTC = True
-#
-# Variable for sun angle calculation
-# Pixelwise = True if you wish to calculate the Sun angle for every pixel
-# Otherwise, The sun angle for camera centre will be used to represent whole image
-# It is suggested to turn off pixelwise calculation since the differece is too small
-Pixelwise = False
-#
-# Variable for Walthal BRDF correction
-# Use for produce BRDF zenith image
-BRDF = False
-###############################################################################
-#
 
 # The following process will only be executed when running script    
 if __name__ == '__main__':
